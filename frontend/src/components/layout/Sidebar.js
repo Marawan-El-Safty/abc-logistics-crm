@@ -32,7 +32,7 @@ const NAV_ITEMS = [
   { to: '/users', label: 'Users', icon: UsersIcon, roles: ['Admin'] },
   { to: '/shipping-rates', label: 'Shipping Rates', icon: TruckIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep', 'Finance', 'Operation'] },
   { to: '/bank-accounts', label: 'Bank Accounts', icon: BuildingLibraryIcon, roles: ['Admin', 'Finance'] },
-  { to: '/audit', label: 'Audit & Trash', icon: ShieldCheckIcon, roles: ['Admin'] },
+  { to: '/audit', label: 'Trash', icon: ShieldCheckIcon, roles: ['Admin'] },
   { to: '/settings', label: 'Settings', icon: Cog6ToothIcon, roles: ['Admin'] },
 ];
 

@@ -24,7 +24,7 @@ const PAGE_TITLES = {
   '/operations': 'Operations',
   '/shipments': 'Shipments',
   '/settings': 'Settings',
-  '/audit': 'Audit & Trash',
+  '/audit': 'Trash',
 };
 
 export default function Layout() {
