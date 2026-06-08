@@ -435,7 +435,7 @@ app.use('/api/sales-invoices', require('./routes/salesInvoices'));
 app.use('/api/emails', require('./routes/emails'));
 
 // Serve built frontend for all non-API routes
-const frontendBuild = path.join(__dirname, '../../frontend/build');
+const frontendBuild = path.join(__dirname, '../frontend/build');
 if (fs.existsSync(frontendBuild)) {
   app.use(express.static(frontendBuild));
   app.get('*', (req, res) => res.sendFile(path.join(frontendBuild, 'index.html')));
