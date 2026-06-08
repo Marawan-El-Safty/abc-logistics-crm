@@ -141,26 +141,6 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      {/* Bank */}
-      <Section icon={BanknotesIcon} title="Default Bank Details" desc="Used on invoice PDFs when no specific bank account is selected">
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Account Name" value={s.pdf?.bank?.accountName} onChange={v => setBank('accountName', v)} />
-          <Field label="Account Number" value={s.pdf?.bank?.accountNumber} onChange={v => setBank('accountNumber', v)} />
-          <div className="form-group">
-            <label className="label">Account Currency</label>
-            <select className="select" value={s.pdf?.bank?.currency || 'USD'} onChange={e => setBank('currency', e.target.value)}>
-              {CURRENCIES.map(c => <option key={c}>{c}</option>)}
-            </select>
-          </div>
-          <Field label="IBAN" value={s.pdf?.bank?.iban} onChange={v => setBank('iban', v)} />
-          <Field label="Bank Name" value={s.pdf?.bank?.bankName} onChange={v => setBank('bankName', v)} />
-          <Field label="SWIFT Code" value={s.pdf?.bank?.swiftCode} onChange={v => setBank('swiftCode', v)} />
-          <div className="col-span-2">
-            <Field label="Bank Address" value={s.pdf?.bank?.bankAddress} onChange={v => setBank('bankAddress', v)} />
-          </div>
-        </div>
-      </Section>
-
       {/* My Signature */}
       <Section icon={EnvelopeIcon} title="My Email Signature" desc="Shown at the bottom of every email you send from the Emails page">
         <div className="grid grid-cols-2 gap-4">
