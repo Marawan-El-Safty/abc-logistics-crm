@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "cd backend && npm ci --omit=dev && cd ../frontend && npm ci && npm run build && cp -r build ../backend/frontend/build"
+buildCommand = "cd backend && npm ci --omit=dev && cd ../frontend && npm ci && CI=false npm run build && cp -r build ../backend/frontend/build"
 
 [deploy]
 startCommand = "cd backend && node src/index.js"
