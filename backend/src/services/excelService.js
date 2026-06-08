@@ -5,7 +5,7 @@ const GOLD = 'FFC9A84C';
 
 exports.exportToExcel = async (sheetName, rows) => {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'SAFTYGROUP CRM';
+  workbook.creator = 'ABC Logistics CRM';
   workbook.created = new Date();
 
   const sheet = workbook.addWorksheet(sheetName);
@@ -54,7 +54,7 @@ exports.exportToExcel = async (sheetName, rows) => {
   });
 
   // SAFTYGROUP branding row at top
-  sheet.spliceRows(1, 0, ['SAFTYGROUP CRM — ' + sheetName]);
+  sheet.spliceRows(1, 0, ['ABC Logistics CRM — ' + sheetName]);
   const titleRow = sheet.getRow(1);
   titleRow.getCell(1).font = { bold: true, color: { argb: NAVY }, size: 13 };
   titleRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };

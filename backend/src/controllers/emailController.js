@@ -26,7 +26,7 @@ function buildSignature(senderName, senderTitle, senderPhone, senderPhone2, send
 <table style="border-top:2px solid #d4af37;padding-top:14px;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#333;border-collapse:collapse;" cellpadding="0" cellspacing="0">
   <tr>
     <td style="padding-right:18px;vertical-align:top;padding-top:4px;">
-      <img src="https://www.abclogistics.com/SubmarkLogo.png" width="70" style="display:block;" alt="ABC Logistics" />
+      <img src="/logo.svg" width="70" style="display:block;" alt="ABC Logistics" />
     </td>
     <td style="vertical-align:top;border-left:3px solid #d4af37;padding-left:16px;">
       <div style="font-size:16px;font-weight:bold;color:#1a1a2e;margin-bottom:2px;">${displayName}</div>
