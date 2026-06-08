@@ -1,0 +1,17 @@
+{
+  "short_name": "ABC CRM",
+  "name": "SAFTYGROUP CRM",
+  "icons": [
+    {
+      "src": "logo.png",
+      "type": "image/png",
+      "sizes": "328x414",
+      "purpose": "any"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#071428",
+  "background_color": "#071428",
+  "description": "SAFTYGROUP Internal CRM for Sales Department"
+}

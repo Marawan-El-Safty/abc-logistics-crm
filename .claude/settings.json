@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(railway*)"
+    ]
+  },
+  "env": {
+    "RAILWAY_TOKEN": "10bafb7c-762f-422f-84d2-ce173fa007c7",
+    "PATH": "/home/safty/.railway/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  }
+}
