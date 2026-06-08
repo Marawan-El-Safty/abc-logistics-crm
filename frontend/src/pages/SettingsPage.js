@@ -165,7 +165,7 @@ export default function SettingsPage() {
           <p className="text-xs font-medium text-slate-400 dark:text-gray-500 mb-3 uppercase tracking-wide">Preview</p>
           <div className="flex items-start gap-3">
             <div className="w-16 h-16 flex-shrink-0 rounded bg-white dark:bg-navy-800 border border-slate-200 dark:border-navy-700 flex items-center justify-center overflow-hidden">
-              <img src="https://www.abclogistics.com/placeholder-logo.png" alt="SG" className="w-14 h-14 object-contain" onError={e => { e.target.style.display='none'; }} />
+              <img src="/logo.svg" alt="SG" className="w-14 h-14 object-contain" onError={e => { e.target.style.display='none'; }} />
             </div>
             <div className="border-l-2 border-gold-500 pl-3 text-xs">
               <div className="text-sm font-bold text-slate-900 dark:text-white">{sigSalutation ? `${sigSalutation} ` : ''}{user?.fullName || 'Your Name'}</div>

@@ -5,7 +5,7 @@ export default function LoadingScreen() {
     <div className="min-h-screen bg-white dark:bg-navy-950 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <img
-          src="https://www.abclogistics.com/placeholder-logo.png"
+          src="/logo.svg"
           alt="ABC Logistics"
           className="h-16 object-contain animate-pulse"
           onError={(e) => { e.target.style.display = 'none'; }}

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="#1e40af"/>
+  <!-- Ship hull -->
+  <path d="M30 120 Q100 90 170 120 L160 140 Q100 155 40 140 Z" fill="#ffffff" opacity="0.95"/>
+  <!-- Ship superstructure -->
+  <rect x="75" y="95" width="50" height="28" rx="3" fill="#ffffff"/>
+  <rect x="85" y="82" width="30" height="16" rx="2" fill="#ffffff"/>
+  <!-- Mast -->
+  <rect x="98" y="65" width="4" height="20" fill="#93c5fd"/>
+  <!-- Flag -->
+  <path d="M102 65 L118 70 L102 75 Z" fill="#60a5fa"/>
+  <!-- Water lines -->
+  <path d="M25 132 Q60 128 100 132 Q140 136 175 132" stroke="#93c5fd" stroke-width="2.5" fill="none" opacity="0.6"/>
+  <path d="M28 140 Q65 136 100 140 Q138 144 172 140" stroke="#93c5fd" stroke-width="1.5" fill="none" opacity="0.4"/>
+  <!-- ABC text -->
+  <text x="100" y="175" font-family="Arial, sans-serif" font-size="22" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="4">ABC</text>
+</svg>

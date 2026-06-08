@@ -51,7 +51,7 @@ export default function Sidebar() {
         {!collapsed ? (
           <div className="flex items-center gap-3">
             <img
-              src="https://www.abclogistics.com/placeholder-logo.png"
+              src="/logo.svg"
               alt="ABC Logistics"
               className="h-9 object-contain"
               onError={(e) => { e.target.style.display = 'none'; }}
@@ -63,7 +63,7 @@ export default function Sidebar() {
           </div>
         ) : (
           <img
-            src="https://www.abclogistics.com/placeholder-logo.png"
+            src="/logo.svg"
             alt="SG"
             className="h-8 object-contain mx-auto"
             onError={(e) => { e.target.style.display = 'none'; }}

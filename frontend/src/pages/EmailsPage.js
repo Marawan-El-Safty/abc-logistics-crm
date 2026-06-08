@@ -20,7 +20,7 @@ function SignatureBlock({ user, settings }) {
     <div className="font-sans text-xs">
       <div className="flex items-start gap-3 mb-3">
         <div className="w-16 h-16 flex-shrink-0 rounded bg-slate-100 dark:bg-navy-800 flex items-center justify-center overflow-hidden">
-          <img src="https://www.abclogistics.com/placeholder-logo.png" alt="SG" className="w-14 h-14 object-contain" onError={e => { e.target.style.display='none'; }} />
+          <img src="/logo.svg" alt="SG" className="w-14 h-14 object-contain" onError={e => { e.target.style.display='none'; }} />
         </div>
         <div className="border-l-2 border-gold-500 pl-3">
           <div className="text-sm font-bold text-slate-900 dark:text-white">{salutation}{name}</div>

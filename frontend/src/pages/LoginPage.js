@@ -47,7 +47,7 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
             <img
-              src="https://www.abclogistics.com/placeholder-logo.png"
+              src="/logo.svg"
               alt="ABC Logistics"
               className="h-16 object-contain mb-4"
               onError={(e) => { e.target.style.display = 'none'; }}
