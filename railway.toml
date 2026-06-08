@@ -1,5 +1,6 @@
 [build]
-builder = "dockerfile"
+builder = "nixpacks"
+buildCommand = "cd backend && npm ci --omit=dev"
 
 [deploy]
 startCommand = "cd backend && node src/index.js"
