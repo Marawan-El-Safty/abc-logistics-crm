@@ -51,14 +51,14 @@ const ROW_H  = 34;
 
 // ── Terms & Conditions (module-level so height can be measured) ──────────────
 const TERMS = [
-  { title: 'Validity & Changes:',            body: 'Quote is subject to immediate change based on carrier space/equipment availability, GRI, or market fluctuations at the time of booking.' },
-  { title: 'Standard Cargo Basis:',          body: 'Rates assume non-hazardous, stackable, and standard commercial cargo unless explicitly noted. Hazardous (HAZMAT), perishable, or oversized goods will incur heavy surcharges.' },
-  { title: 'Fluctuating Surcharges:',        body: 'All shipments are subject to Fuel (FSC/BAF) and Currency (CAF) adjustments applicable at the exact date of departure.' },
-  { title: 'Payment Terms:',                 body: 'Payment is due before release, unless agreed otherwise.' },
-  { title: 'Chargeable Weight & Volume:',    body: 'Final billing is based on actual carrier weights/measurements. The shipper is fully responsible for any discrepancies from the original quote request.' },
-  { title: 'Standard Exclusions:',           body: 'Unless specifically itemized as "Included," this quote excludes: customs duties/taxes, government inspections (X-ray, physical exams), storage, demurrage, and detention.' },
-  { title: 'Limited Liability & Insurance:', body: 'Standard carrier liability is strictly limited by international conventions (e.g., COGSA, Montreal Convention) and rarely covers full cargo value. Cargo is not insured unless comprehensive insurance is requested in writing and paid for in advance.' },
-  { title: 'Cancellations:',                 body: 'Cancellations or booking modifications made within 48 hours of scheduled pickup are subject to cancellation or "dead freight" fees.' },
+  { title: 'Quotation Validity:',         body: 'This quotation is valid for the period stated above. Rates are subject to change due to carrier space and equipment availability, general rate increases (GRI), or market fluctuations at time of booking confirmation.' },
+  { title: 'Cargo Description:',          body: 'Rates are based on the cargo details provided by the client. Any variation in commodity, weight, volume, or packaging may result in rate adjustment. Hazardous, perishable, or oversized cargo requires prior written approval and may attract additional surcharges.' },
+  { title: 'Surcharges & Adjustments:',   body: 'All shipments are subject to applicable surcharges including Bunker Adjustment Factor (BAF), Currency Adjustment Factor (CAF), Peak Season Surcharge (PSS), and Emergency Rate Restoration (ERR) in effect at time of sailing.' },
+  { title: 'Payment Terms:',              body: 'Payment is due as per agreed terms. ABC Logistics reserves the right to withhold release of cargo documents until full settlement of outstanding invoices. Bank charges are to be borne by the remitting party.' },
+  { title: 'Scope of Service:',           body: 'Unless expressly stated, this quotation covers freight charges only. Port handling, customs duties and taxes, inspection fees, storage, demurrage, detention, and inland transportation are excluded unless specifically itemised.' },
+  { title: 'Carrier Liability:',          body: 'Carrier liability is governed by applicable international conventions (Hague-Visby Rules, COGSA, Montreal Convention). ABC Logistics strongly recommends arranging comprehensive cargo insurance. We accept no liability for loss or damage beyond the carrier\'s statutory limits.' },
+  { title: 'Documentation:',              body: 'The client is responsible for providing accurate and complete shipping instructions, commercial invoice, packing list, and any required certificates or permits prior to the agreed documentation cut-off. ABC Logistics is not liable for delays arising from incomplete or incorrect documentation.' },
+  { title: 'Governing Law:',              body: 'This quotation and any resulting contract shall be governed by applicable international trade laws and regulations. Any dispute shall be subject to amicable resolution and, failing that, to the jurisdiction of the competent courts.' },
 ];
 
 const CHARGE_ORDER = {
