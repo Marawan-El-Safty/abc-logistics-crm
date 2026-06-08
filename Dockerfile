@@ -17,7 +17,7 @@ RUN cd frontend && CI=false npm run build
 COPY backend/ ./backend/
 
 # Move frontend build into backend
-RUN cp -r frontend/build backend/frontend/build
+RUN mkdir -p backend/frontend && cp -r frontend/build backend/frontend/build
 
 EXPOSE 3000
 
