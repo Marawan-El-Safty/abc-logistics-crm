@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../services/api';
-import { PlusIcon, DocumentArrowDownIcon, TrashIcon, XCircleIcon, ArrowUturnLeftIcon, PaperAirplaneIcon, EyeIcon, ClockIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, DocumentArrowDownIcon, TrashIcon, XCircleIcon, ArrowUturnLeftIcon, PaperAirplaneIcon, EyeIcon, ClockIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import Badge from '../components/common/Badge';
 import { TableSkeleton } from '../components/common/Skeleton';
 import ConfirmDialog from '../components/common/ConfirmDialog';
@@ -409,40 +409,36 @@ export default function QuotationsPage() {
         danger
       />
 
-      {/* PDF Preview Modal */}
-      <Modal
-        isOpen={previewLoading || !!previewUrl}
-        onClose={closePreview}
-        title={`PDF Preview — ${previewRef}`}
-        size="xl"
-      >
-        {previewLoading ? (
-          <div className="flex items-center justify-center h-[70vh] gap-2 text-slate-500 dark:text-gray-400">
-            <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-            <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-            <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-          </div>
-        ) : previewUrl ? (
-          <div className="flex flex-col gap-3">
-            <iframe
-              src={previewUrl}
-              title={`Quotation ${previewRef}`}
-              className="w-full rounded-xl border border-slate-200 dark:border-navy-700"
-              style={{ height: '70vh' }}
-            />
-            <div className="flex justify-end gap-2">
-              <button className="btn-ghost" onClick={closePreview}>Close</button>
-              <a
-                href={previewUrl}
-                download={`quotation-${previewRef}.pdf`}
-                className="btn-primary"
-              >
-                <DocumentArrowDownIcon className="w-4 h-4 inline mr-1.5" />Download
-              </a>
+      {/* PDF Preview — full-screen overlay */}
+      {(previewLoading || !!previewUrl) && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm">
+          <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-navy-900 border-b border-slate-200 dark:border-navy-700 flex-shrink-0">
+            <span className="text-sm font-medium text-slate-900 dark:text-white">
+              {previewLoading ? 'Generating PDF…' : `PDF Preview — ${previewRef}`}
+            </span>
+            <div className="flex items-center gap-2">
+              {previewUrl && (
+                <a href={previewUrl} download={`quotation-${previewRef}.pdf`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-gold-500 hover:bg-gold-600 text-navy-950 rounded-lg transition-colors">
+                  <DocumentArrowDownIcon className="w-4 h-4" />Download
+                </a>
+              )}
+              <button onClick={closePreview} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
             </div>
           </div>
-        ) : null}
-      </Modal>
+          {previewLoading ? (
+            <div className="flex-1 flex items-center justify-center gap-2 text-slate-400">
+              <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+              <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+              <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+            </div>
+          ) : (
+            <iframe src={previewUrl} className="flex-1 w-full" title={`Quotation ${previewRef}`} />
+          )}
+        </div>
+      )}
 
       {/* Version History Modal */}
       <Modal

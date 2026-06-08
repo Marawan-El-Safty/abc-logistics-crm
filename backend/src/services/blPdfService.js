@@ -8,7 +8,7 @@ const FONT_R = path.join(__dirname, '../../assets/LiberationSans-Regular.ttf');
 const FONT_B = path.join(__dirname, '../../assets/LiberationSans-Bold.ttf');
 const LOGO_FILE = path.join(__dirname, '../../assets/logo.png');
 
-const ORANGE = '#C85A0A';
+const ORANGE = '#1e40af';
 const DARK   = '#1C1C1C';
 const LIGHT  = '#888888';
 const RULE   = '#AAAAAA';

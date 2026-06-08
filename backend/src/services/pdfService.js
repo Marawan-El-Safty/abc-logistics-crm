@@ -33,8 +33,8 @@ const companyFrom = (settings) => ({
 });
 
 // Brand palette
-const ORANGE = '#C85A0A';
-const BLUE   = '#2A4A8A';
+const ORANGE = '#1e40af';
+const BLUE   = '#1e3a8a';
 const WHITE  = '#FFFFFF';
 const OFF    = '#F8F8F6';
 const DARK   = '#1C1C1C';

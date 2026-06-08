@@ -36,12 +36,12 @@ const TERMS = [
   { title: 'Cancellations:',                 body: 'Cancellations or booking modifications made within 48 hours of scheduled pickup are subject to cancellation or "dead freight" fees.' },
 ];
 
-const ORANGE = '#C85A0A';
+const ORANGE = '#1e40af';
 const WHITE  = '#FFFFFF';
 const DARK   = '#1C1C1C';
 const MID    = '#555555';
 const LIGHT  = '#999999';
-const BLUE   = '#2A4A8A';
+const BLUE   = '#1e3a8a';
 const OFF    = '#F8F8F6';
 const RULE   = '#DEDEDE';
 
