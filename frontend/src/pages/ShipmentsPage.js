@@ -9,7 +9,7 @@ import Modal from '../components/common/Modal';
 import ShipmentAttachmentsDrawer from '../components/common/ShipmentAttachmentsDrawer';
 import {
   PlusIcon, TrashIcon, MagnifyingGlassIcon, ArrowsRightLeftIcon, ArrowDownTrayIcon,
-  ArrowUpTrayIcon, DocumentTextIcon, PaperClipIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon,
+  ArrowUpTrayIcon, DocumentTextIcon, PaperClipIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, XMarkIcon,
 } from '@heroicons/react/24/outline';
 
 // Map common sheet header names → CRM camelCase field (normalize: lowercase, strip non-alphanumerics)
@@ -57,7 +57,14 @@ function parseCsv(text) {
 
 const DIRECTIONS = ['Export', 'Import', 'Domestic'];
 const STATUSES = ['Booked', 'In Progress', 'Loaded', 'Sailed', 'Arrived', 'Delivered', 'On Hold', 'Cancelled'];
-const CONTAINER_TYPES = ['20 DRY', '40 DRY', '40 HC', '20 RF', '40 RF', 'LCL', 'Air'];
+const CONTAINER_TYPES = [
+  "20' DC", "40' DC", "40' HC", "45' HC",
+  "20' RF (Reefer)", "40' RF (Reefer)",
+  "20' OT (Open Top)", "40' OT (Open Top)",
+  "20' FR (Flat Rack)", "40' FR (Flat Rack)",
+  'LCL',
+  'Air – General Cargo', 'Air – Temperature Controlled', 'Air – Dangerous Goods (DG)', 'Air – Express',
+];
 
 const STATUS_COLOR = {
   Booked:       'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
@@ -84,7 +91,7 @@ const COLS_BEFORE = [
   ['_row',          '#',               36],
   ['reference',     'Reference',      140],
   ['external_ref',  'Old Ref',        140],
-  ['care_of',       'Care Of',        110],
+  ['care_of',       'Assign To',        110],
   ['shipping_line', 'S/L',            110],
   ['client',        'Client',         140],
   ['pol',           'POL',            110],
@@ -169,7 +176,7 @@ function useResizableColumns(cols) {
 const BL_EMPTY = {
   blNo: '', bookingNo: '', shipper: '', consignee: '', notifyParty: '', alsoNotify: '',
   preCarriage: '', placeOfReceipt: '', pol: '', pod: '', finalDestination: '',
-  vessel: '', voyageNo: '', placeOfDelivery: '', containerNo: '', noOfPkgs: '',
+  vessel: '', voyageNo: '', placeOfDelivery: '', containerNo: '', noOfPkgs: '', kind: '',
   description: '', grossWeight: '', measurement: '', freightCharges: 'AS ARRANGED',
   paymentTerms: 'COLLECT', placeIssued: 'Alexandria', dateIssued: '', noOfOriginals: 3,
   deliveryAgent: '', status: 'Draft',
@@ -198,6 +205,7 @@ export default function ShipmentsPage() {
   const [blListLoading, setBlListLoading] = useState(false);
   const [blEditId, setBlEditId] = useState(null);        // null = new, uuid = editing
   const [savedCells, setSavedCells] = useState(new Set());
+  const [blPreview, setBlPreview] = useState(null); // { url, name }
   const fileRef = useRef(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
@@ -322,7 +330,7 @@ export default function ShipmentsPage() {
       pol: bl.pol || '', pod: bl.pod || '', finalDestination: bl.final_destination || '',
       vessel: bl.vessel || '', voyageNo: bl.voyage_no || '',
       placeOfDelivery: bl.place_of_delivery || '', containerNo: bl.container_no || '',
-      noOfPkgs: bl.no_of_pkgs || '', description: bl.description || '',
+      noOfPkgs: bl.no_of_pkgs || '', kind: '', description: bl.description || '',
       grossWeight: bl.gross_weight || '', measurement: bl.measurement || '',
       freightCharges: bl.freight_charges || 'AS ARRANGED',
       paymentTerms: bl.payment_terms || 'COLLECT',
@@ -337,13 +345,15 @@ export default function ShipmentsPage() {
   const saveBl = async (andDownload = false) => {
     if (!blForm.blNo) { toast.error('B/L No. is required'); return; }
     setBlSaving(true);
+    const combined = [blForm.noOfPkgs, blForm.kind].filter(Boolean).join(' × ');
+    const payload = { ...blForm, noOfPkgs: combined };
     try {
       let savedId = blEditId;
       if (blEditId) {
-        await api.put(`/bl/${blEditId}`, blForm);
+        await api.put(`/bl/${blEditId}`, payload);
         toast.success(andDownload ? 'B/L updated — downloading…' : 'B/L updated');
       } else {
-        const res = await api.post('/bl', { ...blForm, shipmentId: blShipment?.id });
+        const res = await api.post('/bl', { ...payload, shipmentId: blShipment?.id });
         savedId = res.data.data.id;
         toast.success(andDownload ? 'B/L saved — downloading…' : 'B/L saved');
       }
@@ -376,6 +386,14 @@ export default function ShipmentsPage() {
     } catch (_) { toast.error('Error generating B/L PDF'); }
   };
 
+  const previewBlPdf = async (blId, blNo) => {
+    try {
+      const res = await api.get(`/bl/${blId}/pdf`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      setBlPreview({ url, name: `BL-${blNo}.pdf` });
+    } catch (_) { toast.error('Error generating B/L PDF'); }
+  };
+
   const downloadQuotationPdf = async (quotationId, ref) => {
     try {
       const res = await api.get(`/quotations/${quotationId}/pdf`, { responseType: 'blob' });
@@ -390,7 +408,7 @@ export default function ShipmentsPage() {
 
   const exportCsv = () => {
     const cols = [
-      ['reference', 'Reference'], ['external_ref', 'Old Ref'], ['direction', 'Direction'], ['care_of', 'Care Of'],
+      ['reference', 'Reference'], ['external_ref', 'Old Ref'], ['direction', 'Direction'], ['care_of', 'Assign To'],
       ['shipping_line', 'S/L'], ['client_display', 'Client'], ['pol', 'POL'], ['pod', 'POD'],
       ['booking_no', 'Booking No'], ['container_qty', 'Qty'], ['container_type', 'Type'],
       ['status', 'Status'], ['loading_note', 'Loading'], ['note', 'Note'],
@@ -699,6 +717,7 @@ export default function ShipmentsPage() {
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button onClick={() => editBl(bl)} className="text-xs px-2 py-1 rounded-lg bg-slate-100 dark:bg-navy-700 text-slate-600 dark:text-gray-300 hover:bg-gold-100 dark:hover:bg-gold-900/20 hover:text-gold-600 transition-colors">Edit</button>
+                      <button onClick={() => previewBlPdf(bl.id, bl.bl_no)} className="text-xs px-2 py-1 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 hover:bg-green-100 transition-colors">Preview</button>
                       <button onClick={() => downloadBlPdf(bl.id, bl.bl_no)} className="text-xs px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 transition-colors">PDF</button>
                       <button onClick={() => deleteBl(bl.id)} className="text-xs px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-100 transition-colors">Delete</button>
                     </div>
@@ -761,7 +780,21 @@ export default function ShipmentsPage() {
             {/* Row 6 — Cargo */}
             <div className="grid grid-cols-3 gap-3">
               <div><label className="label">Container No. & Seal No.</label><input className="input" value={blForm.containerNo} onChange={e => setBlForm(f => ({...f, containerNo: e.target.value}))} /></div>
-              <div><label className="label">No. of Pkgs / Kind</label><input className="input" value={blForm.noOfPkgs} onChange={e => setBlForm(f => ({...f, noOfPkgs: e.target.value}))} /></div>
+              <div>
+                <label className="label">No. of Pkgs / Kind</label>
+                <div className="flex gap-2">
+                  <input className="input w-20" placeholder="Qty" value={blForm.noOfPkgs} onChange={e => setBlForm(f => ({...f, noOfPkgs: e.target.value}))} />
+                  <select className="select flex-1" value={blForm.kind} onChange={e => setBlForm(f => ({...f, kind: e.target.value}))}>
+                    <option value="">— Kind —</option>
+                    <optgroup label="Sea Freight">
+                      {["20' DC","40' DC","40' HC","45' HC","20' RF (Reefer)","40' RF (Reefer)","20' OT (Open Top)","40' OT (Open Top)","20' FR (Flat Rack)","40' FR (Flat Rack)","LCL"].map(t => <option key={t}>{t}</option>)}
+                    </optgroup>
+                    <optgroup label="Air Freight">
+                      {['Air – General Cargo','Air – Temperature Controlled','Air – Dangerous Goods (DG)','Air – Express'].map(t => <option key={t}>{t}</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+              </div>
               <div><label className="label">Gross Weight</label><input className="input" value={blForm.grossWeight} onChange={e => setBlForm(f => ({...f, grossWeight: e.target.value}))} /></div>
             </div>
 
@@ -797,6 +830,23 @@ export default function ShipmentsPage() {
           </div>
         )}
       </Modal>
+
+      {blPreview && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm">
+          <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-navy-900 border-b border-slate-200 dark:border-navy-700 flex-shrink-0">
+            <span className="text-sm font-medium text-slate-800 dark:text-white">B/L Preview — {blPreview.name}</span>
+            <div className="flex items-center gap-2">
+              <a href={blPreview.url} download={blPreview.name} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gold-500 hover:bg-gold-600 text-white font-medium transition-colors">
+                <ArrowDownTrayIcon className="w-4 h-4" />Download
+              </a>
+              <button onClick={() => { window.URL.revokeObjectURL(blPreview.url); setBlPreview(null); }} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-700 text-slate-500 dark:text-gray-400 transition-colors">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+          <iframe src={blPreview.url} className="flex-1 w-full" title="B/L PDF Preview" />
+        </div>
+      )}
     </div>
   );
 }

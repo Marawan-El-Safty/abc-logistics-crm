@@ -88,6 +88,12 @@ function ChargeList({ charges, currency, onChange, onAdd, onRemove }) {
 }
 
 const SERVICE_TYPES = ['Sea Freight FCL', 'Sea Freight LCL', 'Air Freight', 'Inland Trucking', 'Customs Clearance', 'Storage & Warehousing'];
+
+const CARGO_TYPE_OPTIONS = {
+  'Sea Freight FCL': ["1×20' DC","1×40' DC","1×40' HC","1×45' HC","2×20' DC","2×40' DC","2×40' HC","1×20' RF (Reefer)","1×40' RF (Reefer)","1×20' OT (Open Top)","1×40' OT (Open Top)","1×20' FR (Flat Rack)","1×40' FR (Flat Rack)"],
+  'Sea Freight LCL': ['LCL'],
+  'Air Freight':     ['General Cargo','Temperature Controlled','Dangerous Goods (DG)','Oversized / OOG','Express Cargo','Perishables'],
+};
 const DIRECTIONS = ['', 'Import', 'Export', 'Domestic'];
 const CHARGE_CATEGORIES = ['Freight', 'B/L Charges', 'Local Charges', 'Destination Charges', 'Insurance', 'Custom Clearance', 'Inland Charges', 'Official Receipts', 'Other'];
 const CURRENCIES = ['USD', 'EGP', 'EUR'];
@@ -540,7 +546,14 @@ export default function QuotationFormPage() {
 
                 <div className="form-group">
                   <label className="label">Cargo Type</label>
-                  <input className="input" value={form.cargoType} onChange={e => setForm({...form, cargoType: e.target.value})} />
+                  {CARGO_TYPE_OPTIONS[form.serviceType] ? (
+                    <select className="select" value={form.cargoType} onChange={e => setForm({...form, cargoType: e.target.value})}>
+                      <option value="">— Select —</option>
+                      {CARGO_TYPE_OPTIONS[form.serviceType].map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  ) : (
+                    <input className="input" value={form.cargoType} onChange={e => setForm({...form, cargoType: e.target.value})} placeholder="e.g. Full Truck Load" />
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="label">Currency</label>
