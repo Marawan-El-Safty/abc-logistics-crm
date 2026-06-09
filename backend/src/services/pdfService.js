@@ -5,12 +5,12 @@ const fs = require('fs');
 const path = require('path');
 
 const COMPANY = {
-  name: 'ABC Logistics',
+  name: 'SAFTY GROUP',
   tagline: 'Delivering Your Success',
   address: '6 Abdelfattah Yahia St - Raml Station, Alexandria, Egypt',
-  email: 'sales@abclogistics.com  |  pricing@abclogistics.com',
+  email: 'sales@saftygroup.com  |  pricing@saftygroup.com',
   phone: '+20 111 8 111 463  |  +20 111 74 35 782',
-  logoUrl: process.env.COMPANY_LOGO || 'https://www.abclogistics.com/SubmarkLogo.png',
+  logoUrl: process.env.COMPANY_LOGO || 'https://www.saftygroup.com/SubmarkLogo.png',
   logoFile: path.join(__dirname, '../../assets/logo.png'),
 };
 
@@ -33,8 +33,8 @@ const companyFrom = (settings) => ({
 });
 
 // Brand palette
-const ORANGE = '#1e40af';
-const BLUE   = '#1e3a8a';
+const ORANGE = '#C85A0A';
+const BLUE   = '#2A4A8A';
 const WHITE  = '#FFFFFF';
 const OFF    = '#F8F8F6';
 const DARK   = '#1C1C1C';
@@ -51,14 +51,14 @@ const ROW_H  = 34;
 
 // ── Terms & Conditions (module-level so height can be measured) ──────────────
 const TERMS = [
-  { title: 'Quotation Validity:',         body: 'This quotation is valid for the period stated above. Rates are subject to change due to carrier space and equipment availability, general rate increases (GRI), or market fluctuations at time of booking confirmation.' },
-  { title: 'Cargo Description:',          body: 'Rates are based on the cargo details provided by the client. Any variation in commodity, weight, volume, or packaging may result in rate adjustment. Hazardous, perishable, or oversized cargo requires prior written approval and may attract additional surcharges.' },
-  { title: 'Surcharges & Adjustments:',   body: 'All shipments are subject to applicable surcharges including Bunker Adjustment Factor (BAF), Currency Adjustment Factor (CAF), Peak Season Surcharge (PSS), and Emergency Rate Restoration (ERR) in effect at time of sailing.' },
-  { title: 'Payment Terms:',              body: 'Payment is due as per agreed terms. ABC Logistics reserves the right to withhold release of cargo documents until full settlement of outstanding invoices. Bank charges are to be borne by the remitting party.' },
-  { title: 'Scope of Service:',           body: 'Unless expressly stated, this quotation covers freight charges only. Port handling, customs duties and taxes, inspection fees, storage, demurrage, detention, and inland transportation are excluded unless specifically itemised.' },
-  { title: 'Carrier Liability:',          body: 'Carrier liability is governed by applicable international conventions (Hague-Visby Rules, COGSA, Montreal Convention). ABC Logistics strongly recommends arranging comprehensive cargo insurance. We accept no liability for loss or damage beyond the carrier\'s statutory limits.' },
-  { title: 'Documentation:',              body: 'The client is responsible for providing accurate and complete shipping instructions, commercial invoice, packing list, and any required certificates or permits prior to the agreed documentation cut-off. ABC Logistics is not liable for delays arising from incomplete or incorrect documentation.' },
-  { title: 'Governing Law:',              body: 'This quotation and any resulting contract shall be governed by applicable international trade laws and regulations. Any dispute shall be subject to amicable resolution and, failing that, to the jurisdiction of the competent courts.' },
+  { title: 'Validity & Changes:',            body: 'Quote is subject to immediate change based on carrier space/equipment availability, GRI, or market fluctuations at the time of booking.' },
+  { title: 'Standard Cargo Basis:',          body: 'Rates assume non-hazardous, stackable, and standard commercial cargo unless explicitly noted. Hazardous (HAZMAT), perishable, or oversized goods will incur heavy surcharges.' },
+  { title: 'Fluctuating Surcharges:',        body: 'All shipments are subject to Fuel (FSC/BAF) and Currency (CAF) adjustments applicable at the exact date of departure.' },
+  { title: 'Payment Terms:',                 body: 'Payment is due before release, unless agreed otherwise.' },
+  { title: 'Chargeable Weight & Volume:',    body: 'Final billing is based on actual carrier weights/measurements. The shipper is fully responsible for any discrepancies from the original quote request.' },
+  { title: 'Standard Exclusions:',           body: 'Unless specifically itemized as "Included," this quote excludes: customs duties/taxes, government inspections (X-ray, physical exams), storage, demurrage, and detention.' },
+  { title: 'Limited Liability & Insurance:', body: 'Standard carrier liability is strictly limited by international conventions (e.g., COGSA, Montreal Convention) and rarely covers full cargo value. Cargo is not insured unless comprehensive insurance is requested in writing and paid for in advance.' },
+  { title: 'Cancellations:',                 body: 'Cancellations or booking modifications made within 48 hours of scheduled pickup are subject to cancellation or "dead freight" fees.' },
 ];
 
 const CHARGE_ORDER = {
@@ -443,8 +443,217 @@ exports.generateQuotationPdf = async (quotation, settings = {}) => {
     doc.text(COMPANY.email + '   |   ' + COMPANY.phone, MARGIN, FOOT_Y + 37);
 
     doc.fillColor('rgba(255,255,255,0.4)').fontSize(7);
-    doc.text('Generated by ABC Logistics CRM', W - MARGIN - 130, FOOT_Y + 37,
+    doc.text('Generated by SAFTY GROUP CRM', W - MARGIN - 130, FOOT_Y + 37,
       { width: 130, align: 'right' });
+
+    doc.end();
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPARISON QUOTATION PDF — side-by-side columns, one per S/L option
+// ─────────────────────────────────────────────────────────────────────────────
+exports.generateComparisonPdf = async (quotation, settings = {}) => {
+  const CO = companyFrom(settings);
+  const options = quotation.options || [];
+  const N = options.length;
+
+  // ── Table geometry ────────────────────────────────────────────────────────
+  // | DESCRIPTION (fixed) | OPT A | OPT B | OPT C | OPT D |
+  const DESC_W  = 185;                          // description column
+  const OPT_W   = Math.floor((CW - DESC_W) / N); // each option column
+  const ROW_H   = 22;
+  const HEAD_H  = 36;                            // column-header row height
+  const TOTAL_H = 26;
+
+  const GRID       = RULE;        // cell border colour — matches quotation rules
+  const COL_A      = WHITE;       // odd option columns
+  const COL_B      = OFF;         // even option columns — same alternating shade as quotation rows
+  const HDR_FILL   = ORANGE;      // header row — same orange accent as quotation
+  const TOT_FILL   = BLUE;        // total row — same blue as quotation total bar
+  const HDR_TEXT   = WHITE;
+
+  // draw one cell border rectangle (stroke only)
+  const cellBorder = (x, y, w, h) => {
+    doc.rect(x, y, w, h).lineWidth(0.5).strokeColor(GRID).stroke();
+  };
+
+  const doc = new PDFDocument({ size: 'A4', margin: 0,
+    info: { Title: `Comparison ${quotation.reference_no}`, Author: CO.name } });
+  doc.registerFont('Body',      FONT_REGULAR);
+  doc.registerFont('Body-Bold', FONT_BOLD);
+
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+
+  return new Promise(async (resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+    // ── HEADER BAR ────────────────────────────────────────────────────────────
+    doc.rect(0, 0, 230, HDR_H).fill(WHITE);
+    doc.rect(230, 0, W - 230, HDR_H).fill(ORANGE);
+    doc.rect(0, HDR_H, W, 3).fill(ORANGE);
+    const logoBuffer = await getLogo();
+    if (logoBuffer) { try { doc.image(logoBuffer, MARGIN, 16, { height: 70, fit: [130, 70] }); } catch (_) {} }
+    const infoX = 242;
+    doc.fillColor(WHITE).font('Body-Bold').fontSize(12).text(CO.name, infoX, 18, { width: W - infoX - 20 });
+    doc.font('Body').fontSize(8).fillColor('rgba(255,255,255,0.82)');
+    doc.text(CO.tagline, infoX, 34, { width: W - infoX - 20 });
+    doc.text(CO.address, infoX, 46, { width: W - infoX - 20 });
+    doc.text(CO.email,   infoX, 63, { width: W - infoX - 20 });
+    doc.text(CO.phone,   infoX, 75, { width: W - infoX - 20 });
+
+    let y = HDR_H + 18;
+
+    // ── TITLE + REF BOX ───────────────────────────────────────────────────────
+    doc.fillColor(DARK).font('Body-Bold').fontSize(17).text('FREIGHT RATE COMPARISON', MARGIN, y);
+    const refX = 350, refW = 195, refH = 62;
+    doc.rect(refX, y - 2, refW, refH).lineWidth(0.5).strokeColor(RULE).stroke();
+    doc.rect(refX, y - 2, refW, 2.5).fill(ORANGE);
+    doc.fillColor(LIGHT).font('Body').fontSize(7).text('REFERENCE NO.', refX + 8, y + 6);
+    doc.fillColor(ORANGE).font('Body-Bold').fontSize(14).text(quotation.reference_no, refX + 8, y + 16);
+    doc.fillColor(MID).font('Body').fontSize(8)
+       .text('Date:  ' + new Date(quotation.created_at).toLocaleDateString('en-GB'), refX + 8, y + 36);
+    if (quotation.valid_until)
+      doc.text('Valid until:  ' + new Date(quotation.valid_until).toLocaleDateString('en-GB'), refX + 8, y + 48);
+    y += 72;
+
+    // ── CLIENT + SHIPMENT INFO (2-column compact row) ─────────────────────────
+    const INFO_H = 28;
+    doc.rect(MARGIN, y, CW, INFO_H).fill('#F4F6FB');
+    doc.rect(MARGIN, y, CW, INFO_H).lineWidth(0.5).strokeColor(GRID).stroke();
+
+    const col2W = CW / 2 - 6;
+    const writeInfoCell = (label, val, cx) => {
+      doc.fillColor(ORANGE).font('Body-Bold').fontSize(6.5)
+         .text(label, cx, y + 5, { width: col2W, characterSpacing: 0.4 });
+      doc.fillColor(DARK).font('Body').fontSize(9)
+         .text(val || '—', cx, y + 14, { width: col2W });
+    };
+    writeInfoCell('PREPARED FOR', quotation.client_name || 'N/A', MARGIN + 6);
+    writeInfoCell('ROUTE', `${quotation.origin || '—'} → ${quotation.destination || '—'}`, MARGIN + CW / 2 + 6);
+    // vertical divider
+    doc.rect(MARGIN + CW / 2, y, 0.5, INFO_H).fill(GRID);
+    y += INFO_H;
+
+    // second info row: service type / cargo / transit / validity
+    doc.rect(MARGIN, y, CW, INFO_H).fill(WHITE);
+    doc.rect(MARGIN, y, CW, INFO_H).lineWidth(0.5).strokeColor(GRID).stroke();
+    const col4W = CW / 4 - 4;
+    const infoFields = [
+      ['SERVICE TYPE', quotation.service_type],
+      ['CARGO TYPE',   quotation.cargo_type],
+      ['TRANSIT TIME', quotation.transit_time],
+      ['VALID UNTIL',  quotation.valid_until ? new Date(quotation.valid_until).toLocaleDateString('en-GB') : null],
+    ];
+    infoFields.forEach(([label, val], i) => {
+      const cx = MARGIN + i * (CW / 4) + 6;
+      doc.fillColor(ORANGE).font('Body-Bold').fontSize(6.5)
+         .text(label, cx, y + 5, { width: col4W, characterSpacing: 0.4 });
+      doc.fillColor(DARK).font('Body').fontSize(8.5)
+         .text(val || '—', cx, y + 14, { width: col4W });
+      if (i > 0) doc.rect(MARGIN + i * (CW / 4), y, 0.5, INFO_H).fill(GRID);
+    });
+    y += INFO_H + 12;
+
+    // ── COMPARISON TABLE ──────────────────────────────────────────────────────
+    // Collect all unique descriptions across all options (preserving order)
+    const allDescs = [];
+    options.forEach(opt => {
+      (opt.charges || []).forEach(c => {
+        const key = (c.description || c.category || '').trim();
+        if (key && !allDescs.includes(key)) allDescs.push(key);
+      });
+    });
+
+    // ── Table column-header row ───────────────────────────────────────────────
+    // "DESCRIPTION" cell
+    doc.rect(MARGIN, y, DESC_W, HEAD_H).fill(HDR_FILL);
+    cellBorder(MARGIN, y, DESC_W, HEAD_H);
+    doc.fillColor(HDR_TEXT).font('Body-Bold').fontSize(8.5)
+       .text('DESCRIPTION', MARGIN + 8, y + (HEAD_H - 10) / 2, { width: DESC_W - 16 });
+
+    // Option header cells — alternating white / grey background, dark text
+    options.forEach((opt, i) => {
+      const ox = MARGIN + DESC_W + i * OPT_W;
+      doc.rect(ox, y, OPT_W, HEAD_H).fill(HDR_FILL);
+      cellBorder(ox, y, OPT_W, HEAD_H);
+      doc.fillColor(HDR_TEXT).font('Body-Bold').fontSize(9)
+         .text(opt.label || `Option ${String.fromCharCode(65 + i)}`, ox + 6, y + 5, { width: OPT_W - 12 });
+      doc.font('Body').fontSize(7.5).fillColor('rgba(255,255,255,0.75)')
+         .text(opt.carrier || '', ox + 6, y + 19, { width: OPT_W - 12 });
+    });
+    y += HEAD_H;
+
+    // ── Charge rows — pure column banding (consistent per column, no row alternation) ──
+    // The eye reads vertically on a comparison table, so column banding is cleaner.
+    allDescs.forEach((desc) => {
+      // Description column — always OFF (same as quotation detail cell background)
+      doc.rect(MARGIN, y, DESC_W, ROW_H).fill(OFF);
+      cellBorder(MARGIN, y, DESC_W, ROW_H);
+      doc.fillColor(DARK).font('Body').fontSize(8.5)
+         .text(desc, MARGIN + 8, y + (ROW_H - 10) / 2, { width: DESC_W - 16, lineBreak: false });
+
+      options.forEach((opt, i) => {
+        const ox    = MARGIN + DESC_W + i * OPT_W;
+        const colBg = i % 2 === 0 ? WHITE : OFF;   // column banding only
+        doc.rect(ox, y, OPT_W, ROW_H).fill(colBg);
+        cellBorder(ox, y, OPT_W, ROW_H);
+
+        const charge = (opt.charges || []).find(c => (c.description || c.category || '').trim() === desc);
+        if (charge && charge.amount) {
+          const amt  = parseFloat(charge.amount || 0);
+          const curr = charge.currency || quotation.currency;
+          doc.fillColor(DARK).font('Body-Bold').fontSize(8.5)
+             .text(`${curr} ${amt.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+                   ox + 4, y + (ROW_H - 10) / 2, { width: OPT_W - 8, align: 'right' });
+        } else {
+          doc.fillColor(LIGHT).font('Body').fontSize(8)
+             .text('—', ox + 4, y + (ROW_H - 10) / 2, { width: OPT_W - 8, align: 'center' });
+        }
+      });
+
+      y += ROW_H;
+    });
+
+    // ── TOTAL row ─────────────────────────────────────────────────────────────
+    doc.rect(MARGIN, y, DESC_W, TOTAL_H).fill(TOT_FILL);
+    cellBorder(MARGIN, y, DESC_W, TOTAL_H);
+    doc.fillColor(HDR_TEXT).font('Body-Bold').fontSize(9.5)
+       .text('TOTAL', MARGIN + 8, y + (TOTAL_H - 11) / 2, { width: DESC_W - 16 });
+
+    options.forEach((opt, i) => {
+      const ox    = MARGIN + DESC_W + i * OPT_W;
+      const total = (opt.charges || []).reduce((s, c) => s + parseFloat(c.amount || 0), 0);
+      const curr  = (opt.charges || []).find(c => c.currency)?.currency || quotation.currency;
+      doc.rect(ox, y, OPT_W, TOTAL_H).fill(TOT_FILL);
+      cellBorder(ox, y, OPT_W, TOTAL_H);
+      doc.fillColor(WHITE).font('Body-Bold').fontSize(10)
+         .text(`${curr} ${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+               ox + 4, y + (TOTAL_H - 12) / 2, { width: OPT_W - 8, align: 'right' });
+    });
+    y += TOTAL_H + 14;
+
+    // ── NOTES ─────────────────────────────────────────────────────────────────
+    if (quotation.notes) {
+      doc.rect(MARGIN, y, CW, 0.5).fill(RULE); y += 10;
+      doc.rect(MARGIN, y, 3, 10).fill(ORANGE);
+      doc.fillColor(DARK).font('Body-Bold').fontSize(8).text('NOTES', MARGIN + 8, y, { characterSpacing: 0.8 });
+      y += 16;
+      doc.fillColor(MID).font('Body').fontSize(8.5).text(quotation.notes, MARGIN, y, { width: CW, lineGap: 2.5 });
+      y += doc.heightOfString(quotation.notes, { width: CW, lineGap: 2.5 }) + 10;
+    }
+
+    // ── FOOTER ────────────────────────────────────────────────────────────────
+    doc.rect(0, FOOT_Y, W, 52).fill(BLUE);
+    doc.rect(0, FOOT_Y, W, 2.5).fill(ORANGE);
+    doc.fillColor(WHITE).font('Body-Bold').fontSize(8.5)
+       .text(CO.name + '  —  ' + CO.tagline, MARGIN, FOOT_Y + 11);
+    doc.fillColor('rgba(255,255,255,0.7)').font('Body').fontSize(7.5)
+       .text(CO.address, MARGIN, FOOT_Y + 25)
+       .text(CO.email + '   |   ' + CO.phone, MARGIN, FOOT_Y + 37);
+    doc.fillColor('rgba(255,255,255,0.4)').fontSize(7)
+       .text('Generated by SAFTY GROUP CRM', W - MARGIN - 130, FOOT_Y + 37, { width: 130, align: 'right' });
 
     doc.end();
   });
@@ -488,7 +697,7 @@ exports.generateInvoicePdf = async (invoice, settings = {}) => {
       // Default bank block from admin settings (falls back to company default)
       const b = settings?.pdf?.bank || {};
       return [
-        `ACCOUNT NAME :  ${b.accountName || 'EL ABC Logistics.'}`,
+        `ACCOUNT NAME :  ${b.accountName || 'EL SAFTY GROUP CO.'}`,
         `ACCOUNT No.:  ${b.accountNumber || '1033338610010301'} ( ${b.currency || 'EUR'} )`,
         ``,
         `IBAN:  ${b.iban || 'EG550057000201033338610010301'}`,
@@ -519,12 +728,12 @@ exports.generateInvoicePdf = async (invoice, settings = {}) => {
     // ── Company info — left block ─────────────────────────────────────────────
     let cy = 100;
     doc.fillColor(DARK).font('Body-Bold').fontSize(9.5);
-    doc.text('ABC Logistics.', ML, cy);            cy += 13;
+    doc.text('SAFTY GROUP CO.', ML, cy);            cy += 13;
     doc.text('6 ABDEL FATTAH YAHIA ST - RAMEL STATION', ML, cy); cy += 13;
     doc.text('ALEXANDRIA - 21265', ML, cy);         cy += 19;
     doc.text('20348008148', ML, cy);                cy += 13;
     doc.fillColor(ORANGE).font('Body').fontSize(9);
-    doc.text('sales@abclogistics.com', ML, cy);
+    doc.text('sales@saftygroup.com', ML, cy);
 
     // ── Meta table — right block ──────────────────────────────────────────────
     // Two columns: label (right-aligned) | value (bold/normal)

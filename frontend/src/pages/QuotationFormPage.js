@@ -4,12 +4,88 @@ import toast from 'react-hot-toast';
 import api from '../services/api';
 import {
   ArrowLeftIcon, PlusIcon, TrashIcon, DocumentArrowDownIcon,
-  ArrowPathIcon, SparklesIcon, ExclamationTriangleIcon,
+  ArrowPathIcon, SparklesIcon, ExclamationTriangleIcon, TableCellsIcon,
 } from '@heroicons/react/24/outline';
 import Badge from '../components/common/Badge';
 import Modal from '../components/common/Modal';
 import ClientSelect from '../components/common/ClientSelect';
 import { useAuth } from '../store/AuthContext';
+
+const OPTION_COLORS = ['#2A4A8A', '#2D7D46', '#7B3F8A', '#B5451B'];
+
+function ChargeList({ charges, currency, onChange, onAdd, onRemove }) {
+  return (
+    <div className="space-y-2">
+      {charges.map((charge, idx) => (
+        <div key={idx} className="bg-slate-50 dark:bg-navy-800/40 rounded-lg px-3 py-2 space-y-2">
+          <div className="grid grid-cols-12 gap-2 items-center">
+            <div className="col-span-4">
+              <select className="select text-xs" value={charge.category} onChange={e => onChange(idx, 'category', e.target.value)}>
+                {CHARGE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="col-span-7">
+              <input className="input text-xs" placeholder="Description" value={charge.description}
+                onChange={e => onChange(idx, 'description', e.target.value)} required />
+            </div>
+            <div className="col-span-1 flex justify-end">
+              {charges.length > 1 && (
+                <button type="button" className="text-red-500 hover:text-red-400 p-1" onClick={() => onRemove(idx)}>
+                  <TrashIcon className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-12 gap-2 items-center">
+            <div className="col-span-2">
+              <input className="input text-xs" type="number" min="1" step="1" placeholder="Qty"
+                value={charge.qty} onChange={e => onChange(idx, 'qty', e.target.value)} />
+            </div>
+            <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">×</div>
+            <div className="col-span-3">
+              <input className="input text-xs" type="number" min="0" step="any" placeholder="Sell rate"
+                value={charge.unitRate} onChange={e => onChange(idx, 'unitRate', e.target.value)} />
+            </div>
+            <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">=</div>
+            <div className="col-span-3">
+              <input
+                className={`input text-xs ${charge.unitRate ? 'opacity-70 cursor-default' : ''}`}
+                type="number" placeholder="Amount"
+                value={charge.amount}
+                readOnly={!!charge.unitRate}
+                onChange={e => { if (!charge.unitRate) onChange(idx, 'amount', e.target.value); }}
+                required
+              />
+            </div>
+            <div className="col-span-2">
+              <select className="select text-xs" value={charge.currency || currency} onChange={e => onChange(idx, 'currency', e.target.value)}>
+                {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-12 gap-2 items-center">
+            <div className="col-span-2 text-xs text-orange-400 font-medium">Cost</div>
+            <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">×</div>
+            <div className="col-span-3">
+              <input className="input text-xs border-orange-500/30 focus:border-orange-500"
+                type="number" min="0" step="any" placeholder="Buy rate"
+                value={charge.buyingRate} onChange={e => onChange(idx, 'buyingRate', e.target.value)} />
+            </div>
+            <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">=</div>
+            <div className="col-span-5 text-xs text-orange-400">
+              {charge.buyingRate
+                ? `${charge.currency || currency} ${((parseFloat(charge.qty) || 1) * parseFloat(charge.buyingRate)).toFixed(2)}`
+                : <span className="text-slate-500 dark:text-gray-600">— enter to track cost</span>}
+            </div>
+          </div>
+        </div>
+      ))}
+      <button type="button" className="btn-secondary text-xs w-full mt-1" onClick={onAdd}>
+        <PlusIcon className="w-3.5 h-3.5 inline mr-1" />Add Charge
+      </button>
+    </div>
+  );
+}
 
 const SERVICE_TYPES = ['Sea Freight FCL', 'Sea Freight LCL', 'Air Freight', 'Inland Trucking', 'Customs Clearance', 'Storage & Warehousing'];
 const DIRECTIONS = ['', 'Import', 'Export', 'Domestic'];
@@ -52,6 +128,13 @@ export default function QuotationFormPage() {
     showCarrierInPdf: false,
   });
 
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const [activeOption,   setActiveOption]   = useState(0);
+  const [options, setOptions] = useState([
+    { label: 'Option A', carrier: '', charges: [emptyCharge()] },
+    { label: 'Option B', carrier: '', charges: [emptyCharge()] },
+  ]);
+
   const [clients,    setClients]    = useState([]);
   const [loading,    setLoading]    = useState(false);
   const [saved,      setSaved]      = useState(null);
@@ -76,12 +159,33 @@ export default function QuotationFormPage() {
     finally { setRateLoading(false); }
   };
 
+  // ── Draft autosave (new quotations only) ──────────────────────────────────
+  const DRAFT_KEY = 'quotation_draft';
+  useEffect(() => {
+    if (id) return;
+    const saved = localStorage.getItem(DRAFT_KEY);
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        setForm(f => ({ ...f, ...draft }));
+        toast('Draft restored', { icon: '📋' });
+      } catch {}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (id) return;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+  }, [form, id]);
+
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
     api.get('/clients', { params: { limit: 200 } }).then(r => setClients(r.data.data || [])).catch(() => {});
     if (id) {
       api.get(`/quotations/${id}`).then(res => {
         const q = res.data.data;
+        const isComp = Array.isArray(q.options) && q.options.length > 1;
         setForm({
           clientId:         q.client_id     || '',
           leadId:           q.lead_id       || '',
@@ -110,6 +214,18 @@ export default function QuotationFormPage() {
           carrier:          q.carrier           || '',
           showCarrierInPdf: q.show_carrier_in_pdf === true,
         });
+        if (isComp) {
+          setComparisonMode(true);
+          setOptions(q.options.map(o => ({
+            ...o,
+            charges: (o.charges || [emptyCharge()]).map(c => ({
+              qty:        String(c.qty || '1'),
+              unitRate:   c.unit_rate  != null ? String(c.unit_rate)   : (c.unitRate  || ''),
+              buyingRate: c.buying_rate != null ? String(c.buying_rate) : (c.buyingRate || ''),
+              ...c,
+            })),
+          })));
+        }
         setSaved(q);
       }).catch(() => {});
     }
@@ -129,6 +245,37 @@ export default function QuotationFormPage() {
   };
   const addCharge    = () => setForm({ ...form, charges: [...form.charges, emptyCharge()] });
   const removeCharge = (idx) => setForm({ ...form, charges: form.charges.filter((_, i) => i !== idx) });
+
+  // ── Comparison option helpers ──────────────────────────────────────────────
+  const setOptionCharge = (optIdx, chargeIdx, field, value) => {
+    setOptions(opts => opts.map((opt, oi) => {
+      if (oi !== optIdx) return opt;
+      const charges = opt.charges.map((c, ci) => {
+        if (ci !== chargeIdx) return c;
+        const updated = { ...c, [field]: value };
+        if (field === 'qty' || field === 'unitRate') {
+          const qty  = parseFloat(field === 'qty'     ? value : updated.qty)     || 1;
+          const rate = parseFloat(field === 'unitRate' ? value : updated.unitRate) || 0;
+          if (rate > 0) updated.amount = String((qty * rate).toFixed(2));
+        }
+        return updated;
+      });
+      return { ...opt, charges };
+    }));
+  };
+  const addOptionCharge    = (oi) => setOptions(opts => opts.map((o, i) => i === oi ? { ...o, charges: [...o.charges, emptyCharge()] } : o));
+  const removeOptionCharge = (oi, ci) => setOptions(opts => opts.map((o, i) => i === oi ? { ...o, charges: o.charges.filter((_, j) => j !== ci) } : o));
+  const addOption = () => {
+    if (options.length >= 4) { toast.error('Maximum 4 options'); return; }
+    const labels = ['A', 'B', 'C', 'D'];
+    setOptions(o => [...o, { label: `Option ${labels[o.length]}`, carrier: '', charges: [emptyCharge()] }]);
+    setActiveOption(options.length);
+  };
+  const removeOption = (oi) => {
+    if (options.length <= 2) { toast.error('Minimum 2 options'); return; }
+    setOptions(o => o.filter((_, i) => i !== oi));
+    setActiveOption(prev => Math.max(0, prev >= oi ? prev - 1 : prev));
+  };
 
   const total       = form.charges.reduce((sum, c) => sum + parseFloat(c.amount    || 0), 0);
   const totalBuying = form.charges.reduce((sum, c) => {
@@ -214,13 +361,18 @@ export default function QuotationFormPage() {
     e.preventDefault();
     setLoading(true);
     try {
+      const payload = comparisonMode
+        ? { ...form, options, charges: [] }
+        : { ...form, options: null };
       if (id) {
-        await api.put(`/quotations/${id}`, form);
+        await api.put(`/quotations/${id}`, payload);
       } else {
-        const res = await api.post('/quotations', form);
+        const res = await api.post('/quotations', payload);
+        localStorage.removeItem(DRAFT_KEY);
         navigate(`/quotations/${res.data.data.id}/edit`);
         return;
       }
+      localStorage.removeItem(DRAFT_KEY);
       navigate('/quotations');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error saving quotation');
@@ -270,9 +422,20 @@ export default function QuotationFormPage() {
             {id ? `Edit Quotation${saved ? ` — ${saved.reference_no}` : ''}` : 'New Quotation'}
           </h2>
         </div>
+        <button type="button"
+          onClick={() => setComparisonMode(m => !m)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+            comparisonMode
+              ? 'bg-indigo-600 border-indigo-600 text-white'
+              : 'border-slate-300 dark:border-navy-600 text-slate-600 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600'
+          }`}>
+          <TableCellsIcon className="w-4 h-4" />
+          {comparisonMode ? 'Comparison ON' : 'Comparison'}
+        </button>
         {id && saved && (
           <div className="flex gap-2 items-center">
             <Badge label={saved.status} type="status" />
+            {comparisonMode && <Badge label="Comparison" type="info" />}
             {saved.status === 'Pending Review' && (
               <span className="text-xs text-orange-500 dark:text-orange-400 font-medium animate-pulse">⏳ Awaiting approval</span>
             )}
@@ -446,101 +609,130 @@ export default function QuotationFormPage() {
               </div>
             </div>
 
-            {/* Charges */}
+            {/* Charges — standard or comparison */}
+            {!comparisonMode ? (
             <div className="card">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="section-title">Charges</h3>
-                <div className="flex gap-2">
-                  {/* Find Rates button — shows when origin or destination is filled */}
-                  {(form.origin || form.destination) && (
-                    <button type="button"
-                      className="btn-secondary text-xs border-gold-500/40 text-gold-600 dark:text-gold-400 hover:bg-gold-500/10"
-                      onClick={findRates}>
-                      <SparklesIcon className="w-3.5 h-3.5 inline mr-1" />Find Rates
-                    </button>
-                  )}
-                  <button type="button" className="btn-secondary text-xs" onClick={addCharge}>
-                    <PlusIcon className="w-3.5 h-3.5 inline mr-1" />Add Charge
+                {(form.origin || form.destination) && (
+                  <button type="button"
+                    className="btn-secondary text-xs border-gold-500/40 text-gold-600 dark:text-gold-400 hover:bg-gold-500/10"
+                    onClick={findRates}>
+                    <SparklesIcon className="w-3.5 h-3.5 inline mr-1" />Find Rates
                   </button>
-                </div>
+                )}
+              </div>
+              <ChargeList charges={form.charges} currency={form.currency}
+                onChange={(idx, f, v) => setCharge(idx, f, v)}
+                onAdd={addCharge} onRemove={removeCharge} />
+            </div>
+            ) : (
+            <div className="card">
+              {/* Option tabs */}
+              <div className="flex items-center gap-1 mb-4 flex-wrap">
+                {options.map((opt, i) => (
+                  <button key={i} type="button"
+                    onClick={() => setActiveOption(i)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition-colors ${
+                      activeOption === i
+                        ? 'text-white border-transparent'
+                        : 'bg-transparent border-slate-200 dark:border-navy-600 text-slate-600 dark:text-gray-300 hover:border-slate-400'
+                    }`}
+                    style={activeOption === i ? { backgroundColor: OPTION_COLORS[i % OPTION_COLORS.length], borderColor: OPTION_COLORS[i % OPTION_COLORS.length] } : {}}>
+                    {opt.label || `Option ${String.fromCharCode(65 + i)}`}
+                  </button>
+                ))}
+                {options.length < 4 && (
+                  <button type="button" onClick={addOption}
+                    className="px-3 py-1.5 rounded-lg text-xs border-2 border-dashed border-slate-300 dark:border-navy-600 text-slate-500 dark:text-gray-400 hover:border-indigo-400 hover:text-indigo-500 transition-colors">
+                    <PlusIcon className="w-3.5 h-3.5 inline" /> Add Option
+                  </button>
+                )}
+                {options.length > 2 && (
+                  <button type="button" onClick={() => removeOption(activeOption)}
+                    className="ml-auto text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded">
+                    Remove {options[activeOption]?.label}
+                  </button>
+                )}
               </div>
 
-              <div className="space-y-2">
-                {form.charges.map((charge, idx) => (
-                  <div key={idx} className="bg-slate-50 dark:bg-navy-800/40 rounded-lg px-3 py-2 space-y-2">
-                    {/* Row 1: Category + Description + Delete */}
-                    <div className="grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-4">
-                        <select className="select text-xs" value={charge.category} onChange={e => setCharge(idx, 'category', e.target.value)}>
-                          {CHARGE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                        </select>
-                      </div>
-                      <div className="col-span-7">
-                        <input className="input text-xs" placeholder="Description" value={charge.description}
-                          onChange={e => setCharge(idx, 'description', e.target.value)} required />
-                      </div>
-                      <div className="col-span-1 flex justify-end">
-                        {form.charges.length > 1 && (
-                          <button type="button" className="text-red-500 hover:text-red-400 p-1" onClick={() => removeCharge(idx)}>
-                            <TrashIcon className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
+              {/* Active option editor */}
+              {options.map((opt, oi) => oi !== activeOption ? null : (
+                <div key={oi}>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                      <label className="label text-xs">Option Label</label>
+                      <input className="input" value={opt.label}
+                        onChange={e => setOptions(os => os.map((o, i) => i === oi ? { ...o, label: e.target.value } : o))} />
                     </div>
-                    {/* Row 2: Qty × Sell Rate = Amount + Currency */}
-                    <div className="grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-2">
-                        <input className="input text-xs" type="number" min="1" step="1" placeholder="Qty"
-                          value={charge.qty} onChange={e => setCharge(idx, 'qty', e.target.value)} />
-                      </div>
-                      <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">×</div>
-                      <div className="col-span-3">
-                        <input className="input text-xs" type="number" min="0" step="any" placeholder="Sell rate"
-                          value={charge.unitRate} onChange={e => setCharge(idx, 'unitRate', e.target.value)} />
-                      </div>
-                      <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">=</div>
-                      <div className="col-span-3">
-                        <input
-                          className={`input text-xs ${charge.unitRate ? 'opacity-70 cursor-default' : ''}`}
-                          type="number" placeholder="Amount"
-                          value={charge.amount}
-                          readOnly={!!charge.unitRate}
-                          onChange={e => { if (!charge.unitRate) setCharge(idx, 'amount', e.target.value); }}
-                          required
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <select className="select text-xs" value={charge.currency} onChange={e => setCharge(idx, 'currency', e.target.value)}>
-                          {CURRENCIES.map(c => <option key={c}>{c}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    {/* Row 3: Buying / Cost rate */}
-                    <div className="grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-2 text-xs text-orange-400 font-medium">Cost</div>
-                      <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">×</div>
-                      <div className="col-span-3">
-                        <input className="input text-xs border-orange-500/30 focus:border-orange-500"
-                          type="number" min="0" step="any" placeholder="Buy rate"
-                          value={charge.buyingRate} onChange={e => setCharge(idx, 'buyingRate', e.target.value)} />
-                      </div>
-                      <div className="col-span-1 text-center text-slate-400 dark:text-gray-500 text-xs font-medium">=</div>
-                      <div className="col-span-5 text-xs text-orange-400">
-                        {charge.buyingRate
-                          ? `${charge.currency} ${((parseFloat(charge.qty) || 1) * parseFloat(charge.buyingRate)).toFixed(2)}`
-                          : <span className="text-slate-500 dark:text-gray-600">— enter to track cost</span>}
-                      </div>
+                    <div>
+                      <label className="label text-xs">Shipping Line / Carrier</label>
+                      <input className="input" placeholder="e.g. MSC, Maersk…" value={opt.carrier}
+                        onChange={e => setOptions(os => os.map((o, i) => i === oi ? { ...o, carrier: e.target.value } : o))} />
                     </div>
                   </div>
-                ))}
-              </div>
+                  <ChargeList charges={opt.charges} currency={form.currency}
+                    onChange={(ci, f, v) => setOptionCharge(oi, ci, f, v)}
+                    onAdd={() => addOptionCharge(oi)}
+                    onRemove={(ci) => removeOptionCharge(oi, ci)} />
+                  {/* Option total */}
+                  <div className="mt-3 flex justify-end">
+                    <div className="px-4 py-2 rounded-lg text-sm font-bold text-white"
+                      style={{ backgroundColor: OPTION_COLORS[oi % OPTION_COLORS.length] }}>
+                      {opt.label} Total: {form.currency} {opt.charges.reduce((s, c) => s + parseFloat(c.amount || 0), 0).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* All-options mini summary */}
+              {options.length > 1 && (
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-navy-700 grid gap-2"
+                  style={{ gridTemplateColumns: `repeat(${options.length}, 1fr)` }}>
+                  {options.map((opt, i) => (
+                    <div key={i} className="text-center rounded-lg py-2"
+                      style={{ backgroundColor: OPTION_COLORS[i % OPTION_COLORS.length] + '22', border: `1.5px solid ${OPTION_COLORS[i % OPTION_COLORS.length]}` }}>
+                      <div className="text-xs font-semibold mb-0.5" style={{ color: OPTION_COLORS[i % OPTION_COLORS.length] }}>{opt.label}</div>
+                      <div className="text-sm font-bold text-slate-800 dark:text-white">
+                        {form.currency} {opt.charges.reduce((s, c) => s + parseFloat(c.amount || 0), 0).toFixed(2)}
+                      </div>
+                      {opt.carrier && <div className="text-xs text-slate-400 mt-0.5">{opt.carrier}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+            )}
           </div>
 
           {/* Right: Summary + Actions */}
           <div className="space-y-5">
             <div className="card">
               <h3 className="section-title mb-4">Summary</h3>
+              {comparisonMode ? (
+                <div className="space-y-3">
+                  {options.map((opt, i) => {
+                    const optTotal = opt.charges.reduce((s, c) => s + parseFloat(c.amount || 0), 0);
+                    return (
+                      <div key={i} className="rounded-lg p-3" style={{ backgroundColor: OPTION_COLORS[i % OPTION_COLORS.length] + '18', border: `1.5px solid ${OPTION_COLORS[i % OPTION_COLORS.length]}` }}>
+                        <div className="text-xs font-bold mb-1" style={{ color: OPTION_COLORS[i % OPTION_COLORS.length] }}>
+                          {opt.label}{opt.carrier ? ` · ${opt.carrier}` : ''}
+                        </div>
+                        {opt.charges.filter(c => c.amount).map((c, j) => (
+                          <div key={j} className="flex justify-between text-xs text-slate-600 dark:text-gray-400">
+                            <span className="truncate">{c.description || c.category}</span>
+                            <span className="ml-1 flex-shrink-0">{c.currency || form.currency} {parseFloat(c.amount).toFixed(2)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between font-bold text-sm mt-1 pt-1 border-t border-current/20">
+                          <span style={{ color: OPTION_COLORS[i % OPTION_COLORS.length] }}>Total</span>
+                          <span style={{ color: OPTION_COLORS[i % OPTION_COLORS.length] }}>{form.currency} {optTotal.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
               <div className="space-y-2">
                 {form.charges.filter(c => c.amount).map((c, i) => (
                   <div key={i} className="flex justify-between text-sm">
@@ -575,6 +767,7 @@ export default function QuotationFormPage() {
                   </>
                 )}
               </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-3">

@@ -354,6 +354,9 @@ async function autoMigrate() {
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE bl_documents ADD COLUMN IF NOT EXISTS containers JSONB`);
+  await pool.query(`ALTER TABLE quotations ADD COLUMN IF NOT EXISTS options JSONB`);
+
   // User profile extras
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(150)`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS salutation VARCHAR(20)`);

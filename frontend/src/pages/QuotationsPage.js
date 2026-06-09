@@ -270,7 +270,12 @@ export default function QuotationsPage() {
                   <td className="text-slate-500 dark:text-gray-400 text-xs">{q.origin} → {q.destination}</td>
                   <td className="font-semibold text-slate-900 dark:text-white">{q.currency} {parseFloat(q.total_amount || 0).toLocaleString()}</td>
                   <td>
-                    <Badge label={q.status} type="status" />
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <Badge label={q.status} type="status" />
+                      {Array.isArray(q.options) && q.options.length > 1 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium">Comparison</span>
+                      )}
+                    </div>
                     {q.review_notes && q.status === 'Draft' && (
                       <div className="mt-1 text-xs text-orange-500 dark:text-orange-400 flex items-center gap-1">
                         <ArrowUturnLeftIcon className="w-3 h-3 flex-shrink-0" />
@@ -409,21 +414,18 @@ export default function QuotationsPage() {
         danger
       />
 
-      {/* PDF Preview — full-screen overlay */}
+      {/* PDF Preview — full screen */}
       {(previewLoading || !!previewUrl) && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm">
           <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-navy-900 border-b border-slate-200 dark:border-navy-700 flex-shrink-0">
-            <span className="text-sm font-medium text-slate-900 dark:text-white">
-              {previewLoading ? 'Generating PDF…' : `PDF Preview — ${previewRef}`}
-            </span>
+            <span className="text-sm font-medium text-slate-800 dark:text-white">PDF Preview — {previewRef}</span>
             <div className="flex items-center gap-2">
               {previewUrl && (
-                <a href={previewUrl} download={`quotation-${previewRef}.pdf`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-gold-500 hover:bg-gold-600 text-navy-950 rounded-lg transition-colors">
+                <a href={previewUrl} download={`quotation-${previewRef}.pdf`} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gold-500 hover:bg-gold-600 text-white font-medium transition-colors">
                   <DocumentArrowDownIcon className="w-4 h-4" />Download
                 </a>
               )}
-              <button onClick={closePreview} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors">
+              <button onClick={closePreview} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-700 text-slate-500 dark:text-gray-400 transition-colors">
                 <XMarkIcon className="w-5 h-5" />
               </button>
             </div>
@@ -435,7 +437,7 @@ export default function QuotationsPage() {
               <div className="w-2 h-2 bg-gold-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
             </div>
           ) : (
-            <iframe src={previewUrl} className="flex-1 w-full" title={`Quotation ${previewRef}`} />
+            <iframe src={previewUrl} title={`Quotation ${previewRef}`} className="flex-1 w-full" />
           )}
         </div>
       )}

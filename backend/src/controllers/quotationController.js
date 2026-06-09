@@ -1,5 +1,5 @@
 const { query, withTransaction } = require('../config/db');
-const { generateQuotationPdf } = require('../services/pdfService');
+const { generateQuotationPdf, generateComparisonPdf } = require('../services/pdfService');
 const { createAndPush } = require('./notificationController');
 const { loadSettings } = require('./settingsController');
 const audit = require('./auditController');
@@ -78,13 +78,17 @@ exports.create = async (req, res, next) => {
       clientId, leadId, serviceType, origin, destination, cargoType,
       weight, volume, transitTime, freeDays, currency, validUntil, notes, charges,
       incoterms, incotermOther, pickupLocation, deliveryLocation, carrier, showCarrierInPdf,
-      direction
+      direction, options
     } = req.body;
 
     const refNo = generateRef();
     const toNum = (v) => (v === '' || v === undefined || v === null) ? null : v;
-    const total       = (charges || []).reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
-    const buyingTotal = (charges || []).reduce((sum, c) => {
+    // For comparison quotations total = sum across all options; for standard use charges
+    const allCharges = options?.length
+      ? options.flatMap(o => o.charges || [])
+      : (charges || []);
+    const total       = allCharges.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
+    const buyingTotal = allCharges.reduce((sum, c) => {
       const qty  = parseFloat(c.qty) || 1;
       const rate = parseFloat(c.buyingRate) || 0;
       return sum + qty * rate;
@@ -95,13 +99,14 @@ exports.create = async (req, res, next) => {
         `INSERT INTO quotations (reference_no, client_id, lead_id, service_type, origin, destination,
            cargo_type, weight, volume, transit_time, free_days, currency, total_amount, buying_total,
            valid_until, notes, created_by, incoterms, incoterm_other, pickup_location, delivery_location,
-           carrier, show_carrier_in_pdf, direction)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
+           carrier, show_carrier_in_pdf, direction, options)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
         [refNo, clientId || null, leadId || null, serviceType, origin, destination,
          cargoType, toNum(weight), toNum(volume), toNum(transitTime), toNum(freeDays),
          currency || 'USD', total, buyingTotal || null, validUntil || null, notes, req.user.id,
          incoterms || null, incotermOther || null, pickupLocation || null, deliveryLocation || null,
-         carrier || null, showCarrierInPdf === true, direction || null]
+         carrier || null, showCarrierInPdf === true, direction || null,
+         options ? JSON.stringify(options) : null]
       );
       const q = result.rows[0];
 
@@ -132,12 +137,15 @@ exports.update = async (req, res, next) => {
       serviceType, origin, destination, cargoType, weight, volume,
       transitTime, freeDays, currency, validUntil, notes, status, charges,
       incoterms, incotermOther, pickupLocation, deliveryLocation, carrier, showCarrierInPdf,
-      direction
+      direction, options
     } = req.body;
 
     const toNum = (v) => (v === '' || v === undefined || v === null) ? null : v;
-    const total       = charges ? charges.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0) : undefined;
-    const buyingTotal = charges ? charges.reduce((sum, c) => {
+    const allChargesForTotal = options?.length
+      ? options.flatMap(o => o.charges || [])
+      : charges;
+    const total       = allChargesForTotal ? allChargesForTotal.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0) : undefined;
+    const buyingTotal = allChargesForTotal ? allChargesForTotal.reduce((sum, c) => {
       const qty  = parseFloat(c.qty) || 1;
       const rate = parseFloat(c.buyingRate) || 0;
       return sum + qty * rate;
@@ -191,20 +199,22 @@ exports.update = async (req, res, next) => {
            client_id = COALESCE($22, client_id),
            lead_id = COALESCE($23, lead_id),
            direction = $24,
+           options = $25,
            updated_at = NOW()
          WHERE id = $21 AND deleted_at IS NULL RETURNING *`,
         [serviceType, origin, destination, cargoType,
          (weight === '' ? null : weight), (volume === '' ? null : volume),
          (transitTime === '' ? null : transitTime), (freeDays === '' ? null : freeDays),
-         currency, total, buyingTotal ?? null, validUntil, notes, status,
+         currency, total, buyingTotal ?? null, validUntil || null, notes, status,
          incoterms || null, incotermOther || null, pickupLocation || null, deliveryLocation || null,
          carrier || null, showCarrierInPdf === true,
          req.params.id,
-         clientId || null, leadId || null, direction || null]
+         clientId || null, leadId || null, direction || null,
+         options !== undefined ? JSON.stringify(options) : null]
       );
       if (!result.rows.length) return null;
 
-      if (charges) {
+      if (charges && !options?.length) {
         await client.query('DELETE FROM quotation_charges WHERE quotation_id = $1', [req.params.id]);
         for (const charge of charges) {
           await client.query(
@@ -357,7 +367,10 @@ exports.generatePdf = async (req, res, next) => {
     const quotation = { ...result.rows[0], charges: charges.rows };
 
     const settings = await loadSettings();
-    const pdfBuffer = await generateQuotationPdf(quotation, settings);
+    const isComparison = Array.isArray(quotation.options) && quotation.options.length > 1;
+    const pdfBuffer = isComparison
+      ? await generateComparisonPdf(quotation, settings)
+      : await generateQuotationPdf(quotation, settings);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="quotation-${quotation.reference_no}.pdf"`);
     res.send(pdfBuffer);
