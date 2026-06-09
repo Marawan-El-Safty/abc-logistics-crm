@@ -128,7 +128,7 @@ export default function QuotationFormPage() {
     showCarrierInPdf: false,
   });
 
-  const [comparisonMode, setComparisonMode] = useState(false);
+  const [comparisonMode, setComparisonMode] = useState(searchParams.get('mode') === 'comparison');
   const [activeOption,   setActiveOption]   = useState(0);
   const [options, setOptions] = useState([
     { label: 'Option A', carrier: '', charges: [emptyCharge()] },

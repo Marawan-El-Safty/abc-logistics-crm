@@ -10,7 +10,7 @@ import {
   ArrowRightOnRectangleIcon, CalculatorIcon, BanknotesIcon,
   CurrencyDollarIcon, BuildingLibraryIcon, TruckIcon, RocketLaunchIcon,
   Cog6ToothIcon, ShieldCheckIcon, ArrowsRightLeftIcon,
-  SunIcon, MoonIcon, EnvelopeIcon,
+  SunIcon, MoonIcon, EnvelopeIcon, TableCellsIcon,
 } from '@heroicons/react/24/outline';
 
 const NAV_ITEMS = [
@@ -18,14 +18,13 @@ const NAV_ITEMS = [
   { to: '/clients', label: 'Contacts', icon: UserGroupIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep', 'Finance', 'Operation'] },
   { to: '/leads', label: 'Leads', icon: FunnelIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
   { to: '/quotations', label: 'Quotations', icon: DocumentTextIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep', 'Finance', 'Operation'] },
+  { to: '/comparisons', label: 'Comparisons', icon: TableCellsIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep', 'Finance'] },
   { to: '/operations', label: 'Operations', icon: RocketLaunchIcon, roles: ['Admin', 'Sales Manager', 'Operation'] },
   { to: '/shipments', label: 'Shipments', icon: ArrowsRightLeftIcon, roles: ['Admin', 'Sales Manager', 'Operation'] },
   { to: '/invoices', label: 'Invoices', icon: CurrencyDollarIcon, roles: ['Admin', 'Finance'] },
-  { to: '/sales-invoices', label: 'Sales Invoices', icon: DocumentTextIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
   { to: '/calculator', label: 'Rate Calculator', icon: CalculatorIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
   { to: '/emails', label: 'Emails', icon: EnvelopeIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
   { to: '/activities', label: 'Activities', icon: ClipboardDocumentListIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
-  { to: '/tasks', label: 'Tasks', icon: CheckCircleIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
   { to: '/requests', label: 'Open Requests', icon: BriefcaseIcon, roles: ['Admin', 'Sales Manager', 'Sales Rep'] },
   { to: '/profit', label: 'Profit & Margin', icon: BanknotesIcon, roles: ['Admin', 'Sales Manager'] },
   { to: '/reports', label: 'Reports & KPIs', icon: ChartBarIcon, roles: ['Admin', 'Sales Manager'] },
@@ -58,7 +57,7 @@ export default function Sidebar() {
             />
             <div>
               <div className="text-slate-900 dark:text-white font-bold text-sm leading-tight">ABC Logistics</div>
-              <div className="text-gold-600 dark:text-gold-500 text-xs">CRM</div>
+              <div className="text-gold-600 dark:text-gold-500 text-xs">Freight Operations</div>
             </div>
           </div>
         ) : (

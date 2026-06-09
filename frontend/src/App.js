@@ -31,6 +31,7 @@ const SalesInvoicesPage = lazy(() => import('./pages/SalesInvoicesPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const AuditPage = lazy(() => import('./pages/AuditPage'));
 const EmailsPage = lazy(() => import('./pages/EmailsPage'));
+const ComparisonsPage = lazy(() => import('./pages/ComparisonsPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 const ProtectedRoute = ({ children, roles }) => {
@@ -58,6 +59,7 @@ const AppRoutes = () => {
           <Route path="quotations" element={<QuotationsPage />} />
           <Route path="quotations/new" element={<QuotationFormPage />} />
           <Route path="quotations/:id/edit" element={<QuotationFormPage />} />
+          <Route path="comparisons" element={<ComparisonsPage />} />
           <Route path="activities" element={<ActivitiesPage />} />
           <Route path="tasks" element={<TasksPage />} />
           <Route path="requests" element={
