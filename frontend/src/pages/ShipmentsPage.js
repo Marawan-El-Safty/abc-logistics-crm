@@ -176,7 +176,7 @@ function useResizableColumns(cols) {
 const BL_EMPTY = {
   blNo: '', bookingNo: '', shipper: '', consignee: '', notifyParty: '', alsoNotify: '',
   preCarriage: '', placeOfReceipt: '', pol: '', pod: '', finalDestination: '',
-  vessel: '', voyageNo: '', placeOfDelivery: '', containerNo: '', noOfPkgs: '', kind: '',
+  vessel: '', voyageNo: '', placeOfDelivery: '', containerNo: '', noOfPkgs: '',
   description: '', grossWeight: '', measurement: '', freightCharges: 'AS ARRANGED',
   paymentTerms: 'COLLECT', placeIssued: 'Alexandria', dateIssued: '', noOfOriginals: 3,
   deliveryAgent: '', status: 'Draft',
@@ -330,7 +330,7 @@ export default function ShipmentsPage() {
       pol: bl.pol || '', pod: bl.pod || '', finalDestination: bl.final_destination || '',
       vessel: bl.vessel || '', voyageNo: bl.voyage_no || '',
       placeOfDelivery: bl.place_of_delivery || '', containerNo: bl.container_no || '',
-      noOfPkgs: bl.no_of_pkgs || '', kind: '', description: bl.description || '',
+      noOfPkgs: bl.no_of_pkgs || '', description: bl.description || '',
       grossWeight: bl.gross_weight || '', measurement: bl.measurement || '',
       freightCharges: bl.freight_charges || 'AS ARRANGED',
       paymentTerms: bl.payment_terms || 'COLLECT',
@@ -345,15 +345,13 @@ export default function ShipmentsPage() {
   const saveBl = async (andDownload = false) => {
     if (!blForm.blNo) { toast.error('B/L No. is required'); return; }
     setBlSaving(true);
-    const combined = [blForm.noOfPkgs, blForm.kind].filter(Boolean).join(' × ');
-    const payload = { ...blForm, noOfPkgs: combined };
     try {
       let savedId = blEditId;
       if (blEditId) {
-        await api.put(`/bl/${blEditId}`, payload);
+        await api.put(`/bl/${blEditId}`, blForm);
         toast.success(andDownload ? 'B/L updated — downloading…' : 'B/L updated');
       } else {
-        const res = await api.post('/bl', { ...payload, shipmentId: blShipment?.id });
+        const res = await api.post('/bl', { ...blForm, shipmentId: blShipment?.id });
         savedId = res.data.data.id;
         toast.success(andDownload ? 'B/L saved — downloading…' : 'B/L saved');
       }
@@ -780,21 +778,7 @@ export default function ShipmentsPage() {
             {/* Row 6 — Cargo */}
             <div className="grid grid-cols-3 gap-3">
               <div><label className="label">Container No. & Seal No.</label><input className="input" value={blForm.containerNo} onChange={e => setBlForm(f => ({...f, containerNo: e.target.value}))} /></div>
-              <div>
-                <label className="label">No. of Pkgs / Kind</label>
-                <div className="flex gap-2">
-                  <input className="input w-20" placeholder="Qty" value={blForm.noOfPkgs} onChange={e => setBlForm(f => ({...f, noOfPkgs: e.target.value}))} />
-                  <select className="select flex-1" value={blForm.kind} onChange={e => setBlForm(f => ({...f, kind: e.target.value}))}>
-                    <option value="">— Kind —</option>
-                    <optgroup label="Sea Freight">
-                      {["20' DC","40' DC","40' HC","45' HC","20' RF (Reefer)","40' RF (Reefer)","20' OT (Open Top)","40' OT (Open Top)","20' FR (Flat Rack)","40' FR (Flat Rack)","LCL"].map(t => <option key={t}>{t}</option>)}
-                    </optgroup>
-                    <optgroup label="Air Freight">
-                      {['Air – General Cargo','Air – Temperature Controlled','Air – Dangerous Goods (DG)','Air – Express'].map(t => <option key={t}>{t}</option>)}
-                    </optgroup>
-                  </select>
-                </div>
-              </div>
+              <div><label className="label">No. of Pkgs</label><input className="input" value={blForm.noOfPkgs} onChange={e => setBlForm(f => ({...f, noOfPkgs: e.target.value}))} /></div>
               <div><label className="label">Gross Weight</label><input className="input" value={blForm.grossWeight} onChange={e => setBlForm(f => ({...f, grossWeight: e.target.value}))} /></div>
             </div>
 

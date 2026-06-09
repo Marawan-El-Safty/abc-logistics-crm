@@ -13,9 +13,16 @@ import { useAuth } from '../store/AuthContext';
 
 const OPTION_COLORS = ['#2A4A8A', '#2D7D46', '#7B3F8A', '#B5451B'];
 
-function ChargeList({ charges, currency, onChange, onAdd, onRemove }) {
+function ChargeList({ charges, currency, onChange, onAdd, onRemove, serviceType }) {
+  const descSuggestions = CARGO_TYPE_OPTIONS[serviceType] || null;
+  const listId = descSuggestions ? `desc-list-${serviceType.replace(/\s+/g, '-')}` : undefined;
   return (
     <div className="space-y-2">
+      {descSuggestions && (
+        <datalist id={listId}>
+          {descSuggestions.map(opt => <option key={opt} value={opt} />)}
+        </datalist>
+      )}
       {charges.map((charge, idx) => (
         <div key={idx} className="bg-slate-50 dark:bg-navy-800/40 rounded-lg px-3 py-2 space-y-2">
           <div className="grid grid-cols-12 gap-2 items-center">
@@ -26,6 +33,7 @@ function ChargeList({ charges, currency, onChange, onAdd, onRemove }) {
             </div>
             <div className="col-span-7">
               <input className="input text-xs" placeholder="Description" value={charge.description}
+                list={listId}
                 onChange={e => onChange(idx, 'description', e.target.value)} required />
             </div>
             <div className="col-span-1 flex justify-end">
@@ -636,6 +644,7 @@ export default function QuotationFormPage() {
                 )}
               </div>
               <ChargeList charges={form.charges} currency={form.currency}
+                serviceType={form.serviceType}
                 onChange={(idx, f, v) => setCharge(idx, f, v)}
                 onAdd={addCharge} onRemove={removeCharge} />
             </div>
@@ -685,6 +694,7 @@ export default function QuotationFormPage() {
                     </div>
                   </div>
                   <ChargeList charges={opt.charges} currency={form.currency}
+                    serviceType={form.serviceType}
                     onChange={(ci, f, v) => setOptionCharge(oi, ci, f, v)}
                     onAdd={() => addOptionCharge(oi)}
                     onRemove={(ci) => removeOptionCharge(oi, ci)} />
