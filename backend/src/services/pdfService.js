@@ -32,7 +32,13 @@ const companyFrom = (settings) => ({
   ...(settings?.company?.phone   ? { phone:   settings.company.phone }   : {}),
 });
 
-// Brand palette
+// Read brand colors from settings — each PDF call overrides these locals
+const colorsFrom = (settings) => ({
+  primary:   settings?.pdf?.primaryColor   || '#C85A0A',
+  secondary: settings?.pdf?.secondaryColor || '#2A4A8A',
+});
+
+// Brand palette (module-level fallbacks — overridden per-call via colorsFrom)
 const ORANGE = '#C85A0A';
 const BLUE   = '#2A4A8A';
 const WHITE  = '#FFFFFF';
@@ -143,7 +149,8 @@ function calcContentHeight(quotation, doc) {
 }
 
 exports.generateQuotationPdf = async (quotation, settings = {}) => {
-  const COMPANY = companyFrom(settings);   // shadows module default with admin config
+  const COMPANY = companyFrom(settings);
+  const { primary: ORANGE, secondary: BLUE } = colorsFrom(settings);  // brand colors override module constants
   const doc = new PDFDocument({
     size: 'A4', margin: 0,
     info: { Title: `Quotation ${quotation.reference_no}`, Author: COMPANY.name },
@@ -455,6 +462,7 @@ exports.generateQuotationPdf = async (quotation, settings = {}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 exports.generateComparisonPdf = async (quotation, settings = {}) => {
   const CO = companyFrom(settings);
+  const { primary: ORANGE, secondary: BLUE } = colorsFrom(settings);
   const options = quotation.options || [];
   const N = options.length;
 
@@ -663,7 +671,8 @@ exports.generateComparisonPdf = async (quotation, settings = {}) => {
 // INVOICE PDF — replicates the Excel invoice template used by the finance team
 // ─────────────────────────────────────────────────────────────────────────────
 exports.generateInvoicePdf = async (invoice, settings = {}) => {
-  const COMPANY = companyFrom(settings);   // shadows module default with admin config
+  const COMPANY = companyFrom(settings);
+  const { primary: ORANGE, secondary: BLUE } = colorsFrom(settings);
   const doc = new PDFDocument({
     size: 'A4', margin: 0,
     info: { Title: `Invoice ${invoice.invoice_no}`, Author: COMPANY.name },

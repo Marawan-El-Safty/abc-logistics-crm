@@ -11,6 +11,8 @@ const DEFAULTS = {
   },
   defaultCurrency: 'USD',
   pdf: {
+    primaryColor:   '#1A56A0',   // ABC Logistics blue — used for header accent, totals, highlights
+    secondaryColor: '#1A56A0',   // same for footer bar
     footerDisclaimer:
       'THIS STATEMENT IS CONSIDERED APPROVED UNLESS YOUR OBJECTIONS REACH US ' +
       'WITH ONE WEEK AND NOT EXPOSED TO THE  TAX DEDUCT',
