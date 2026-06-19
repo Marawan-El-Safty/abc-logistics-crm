@@ -7,8 +7,8 @@ exports.getAll = async (req, res, next) => {
   try {
     const { search, industry, country, assignedTo, contactType, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
-    const conditions = ['c.deleted_at IS NULL'];
+    const params = [req.tenantId];
+    const conditions = ['c.deleted_at IS NULL', 'c.tenant_id = $1'];
 
     if (search) {
       params.push(`%${search}%`);
@@ -38,8 +38,8 @@ exports.getAll = async (req, res, next) => {
     params.push(limit, offset);
     const result = await query(
       `SELECT c.*, u.full_name AS assigned_to_name,
-              (SELECT COUNT(*) FROM activities a WHERE a.client_id = c.id) AS activity_count,
-              (SELECT MAX(a.activity_date) FROM activities a WHERE a.client_id = c.id) AS last_activity_at
+              (SELECT COUNT(*) FROM activities a WHERE a.client_id = c.id AND a.tenant_id = c.tenant_id) AS activity_count,
+              (SELECT MAX(a.activity_date) FROM activities a WHERE a.client_id = c.id AND a.tenant_id = c.tenant_id) AS last_activity_at
        FROM clients c
        LEFT JOIN users u ON c.assigned_to = u.id
        ${whereClause}
@@ -59,8 +59,8 @@ exports.getById = async (req, res, next) => {
        FROM clients c
        LEFT JOIN users u ON c.assigned_to = u.id
        LEFT JOIN users cb ON c.created_by = cb.id
-       WHERE c.id = $1 AND c.deleted_at IS NULL`,
-      [req.params.id]
+       WHERE c.id = $1 AND c.tenant_id = $2 AND c.deleted_at IS NULL`,
+      [req.params.id, req.tenantId]
     );
     if (!clientResult.rows.length) return res.status(404).json({ error: 'Client not found' });
 
@@ -70,14 +70,14 @@ exports.getById = async (req, res, next) => {
       query(
         `SELECT a.*, u.full_name AS performed_by_name FROM activities a
          LEFT JOIN users u ON a.performed_by = u.id
-         WHERE a.client_id = $1 ORDER BY a.activity_date DESC LIMIT 20`,
-        [req.params.id]
+         WHERE a.client_id = $1 AND a.tenant_id = $2 ORDER BY a.activity_date DESC LIMIT 20`,
+        [req.params.id, req.tenantId]
       ),
       query(
         `SELECT q.*, u.full_name AS created_by_name FROM quotations q
          LEFT JOIN users u ON q.created_by = u.id
-         WHERE q.client_id = $1 AND q.deleted_at IS NULL ORDER BY q.created_at DESC`,
-        [req.params.id]
+         WHERE q.client_id = $1 AND q.tenant_id = $2 AND q.deleted_at IS NULL ORDER BY q.created_at DESC`,
+        [req.params.id, req.tenantId]
       ),
     ]);
 
@@ -98,10 +98,10 @@ exports.create = async (req, res, next) => {
     const { companyName, industry, country, address, website, notes, assignedTo, contactType, email, phone, productType } = req.body;
     const assignee = isRepRole(req.user) ? req.user.id : (assignedTo || req.user.id);
     const result = await query(
-      `INSERT INTO clients (company_name, industry, country, address, website, notes, assigned_to, created_by, contact_type, email, phone, product_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO clients (company_name, industry, country, address, website, notes, assigned_to, created_by, contact_type, email, phone, product_type, tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
-      [companyName?.toUpperCase() || null, industry || 'Other', country?.toUpperCase() || null, address, website, notes, assignee, req.user.id, contactType || 'Client', email, phone, productType || null]
+      [companyName?.toUpperCase() || null, industry || 'Other', country?.toUpperCase() || null, address, website, notes, assignee, req.user.id, contactType || 'Client', email, phone, productType || null, req.tenantId]
     );
     res.status(201).json({ data: result.rows[0] });
   } catch (err) { next(err); }
@@ -125,8 +125,8 @@ exports.update = async (req, res, next) => {
          phone = COALESCE($11, phone),
          product_type = COALESCE($12, product_type),
          updated_at = NOW()
-       WHERE id = $13 AND deleted_at IS NULL RETURNING *`,
-      [companyName?.toUpperCase() || null, industry, country?.toUpperCase() || null, address, website, notes, assignedTo, isActive, contactType, email, phone, productType || null, req.params.id]
+       WHERE id = $13 AND tenant_id = $14 AND deleted_at IS NULL RETURNING *`,
+      [companyName?.toUpperCase() || null, industry, country?.toUpperCase() || null, address, website, notes, assignedTo, isActive, contactType, email, phone, productType || null, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Client not found' });
     res.json({ data: result.rows[0] });
@@ -135,16 +135,22 @@ exports.update = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    const r = await query('UPDATE clients SET deleted_at = NOW() WHERE id = $1 RETURNING company_name', [req.params.id]);
+    const r = await query(
+      'UPDATE clients SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2 RETURNING company_name',
+      [req.params.id, req.tenantId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Client not found' });
     await audit.log(req, { action: 'DELETE', entityType: 'client', entityId: req.params.id, entityLabel: r.rows[0]?.company_name });
     res.json({ message: 'Client deleted' });
   } catch (err) { next(err); }
 };
 
-// Contacts
 exports.addContact = async (req, res, next) => {
   try {
     const { fullName, title, phone, email, whatsapp, isPrimary } = req.body;
+    // Verify client belongs to tenant
+    const clientCheck = await query('SELECT id FROM clients WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+    if (!clientCheck.rows.length) return res.status(404).json({ error: 'Client not found' });
     if (isPrimary) {
       await query('UPDATE client_contacts SET is_primary = FALSE WHERE client_id = $1', [req.params.id]);
     }
@@ -160,6 +166,8 @@ exports.addContact = async (req, res, next) => {
 exports.updateContact = async (req, res, next) => {
   try {
     const { fullName, title, phone, email, whatsapp, isPrimary } = req.body;
+    const clientCheck = await query('SELECT id FROM clients WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+    if (!clientCheck.rows.length) return res.status(404).json({ error: 'Client not found' });
     if (isPrimary) {
       await query('UPDATE client_contacts SET is_primary = FALSE WHERE client_id = $1', [req.params.id]);
     }
@@ -181,15 +189,18 @@ exports.updateContact = async (req, res, next) => {
 
 exports.deleteContact = async (req, res, next) => {
   try {
+    const clientCheck = await query('SELECT id FROM clients WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+    if (!clientCheck.rows.length) return res.status(404).json({ error: 'Client not found' });
     await query('DELETE FROM client_contacts WHERE id = $1 AND client_id = $2', [req.params.contactId, req.params.id]);
     res.json({ message: 'Contact deleted' });
   } catch (err) { next(err); }
 };
 
-// Branches
 exports.addBranch = async (req, res, next) => {
   try {
     const { name, country, address, phone, notes } = req.body;
+    const clientCheck = await query('SELECT id FROM clients WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+    if (!clientCheck.rows.length) return res.status(404).json({ error: 'Client not found' });
     const result = await query(
       `INSERT INTO client_branches (client_id, name, country, address, phone, notes)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -201,6 +212,8 @@ exports.addBranch = async (req, res, next) => {
 
 exports.deleteBranch = async (req, res, next) => {
   try {
+    const clientCheck = await query('SELECT id FROM clients WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+    if (!clientCheck.rows.length) return res.status(404).json({ error: 'Client not found' });
     await query('DELETE FROM client_branches WHERE id = $1 AND client_id = $2', [req.params.branchId, req.params.id]);
     res.json({ message: 'Branch deleted' });
   } catch (err) { next(err); }
@@ -229,8 +242,8 @@ exports.importCsv = async (req, res, next) => {
       if (!companyName) { skipped++; continue; }
       try {
         await query(
-          `INSERT INTO clients (company_name, industry, country, address, website, notes, assigned_to, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`,
+          `INSERT INTO clients (company_name, industry, country, address, website, notes, assigned_to, created_by, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8)`,
           [
             companyName,
             getCol(row, 'industry') || 'Other',
@@ -239,6 +252,7 @@ exports.importCsv = async (req, res, next) => {
             getCol(row, 'website'),
             getCol(row, 'notes'),
             req.user.id,
+            req.tenantId,
           ]
         );
         imported++;

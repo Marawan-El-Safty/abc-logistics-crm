@@ -4,8 +4,8 @@ exports.getAll = async (req, res, next) => {
   try {
     const { status, priority, assignedTo, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
-    const conditions = ['t.deleted_at IS NULL'];
+    const params = [req.tenantId];
+    const conditions = ['t.deleted_at IS NULL', 't.tenant_id = $1'];
 
     if (req.user.role_name === 'Sales Rep') {
       params.push(req.user.id);
@@ -40,8 +40,8 @@ exports.getAll = async (req, res, next) => {
 exports.getCalendar = async (req, res, next) => {
   try {
     const { from, to } = req.query;
-    const params = [from || new Date().toISOString().slice(0, 10)];
-    const conditions = [`t.due_date >= $1`, `t.deleted_at IS NULL`];
+    const params = [from || new Date().toISOString().slice(0, 10), req.tenantId];
+    const conditions = ['t.due_date >= $1', 't.deleted_at IS NULL', 't.tenant_id = $2'];
 
     if (to) { params.push(to); conditions.push(`t.due_date <= $${params.length}`); }
     if (req.user.role_name === 'Sales Rep') {
@@ -49,10 +49,9 @@ exports.getCalendar = async (req, res, next) => {
       conditions.push(`t.assigned_to = $${params.length}`);
     }
 
-    // Also get follow-ups
-    const fupParams = [...params];
-    const fupConditions = [`a.next_follow_up >= $1`, `a.next_follow_up IS NOT NULL`];
-    if (to) fupConditions.push(`a.next_follow_up <= $2`);
+    const fupParams = [from || new Date().toISOString().slice(0, 10), req.tenantId];
+    const fupConditions = ['a.next_follow_up >= $1', 'a.next_follow_up IS NOT NULL', 'a.tenant_id = $2'];
+    if (to) { fupParams.push(to); fupConditions.push(`a.next_follow_up <= $${fupParams.length}`); }
     if (req.user.role_name === 'Sales Rep') {
       fupParams.push(req.user.id);
       fupConditions.push(`a.performed_by = $${fupParams.length}`);
@@ -86,10 +85,10 @@ exports.create = async (req, res, next) => {
     const { title, description, dueDate, priority, assignedTo, clientId, leadId } = req.body;
     const assignee = req.user.role_name === 'Sales Rep' ? req.user.id : (assignedTo || req.user.id);
     const result = await query(
-      `INSERT INTO tasks (title, description, due_date, priority, assigned_to, assigned_by, client_id, lead_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO tasks (title, description, due_date, priority, assigned_to, assigned_by, client_id, lead_id, created_by, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [title, description, dueDate || null, priority || 'Medium', assignee, req.user.id,
-       clientId || null, leadId || null, req.user.id]
+       clientId || null, leadId || null, req.user.id, req.tenantId]
     );
     res.status(201).json({ data: result.rows[0] });
   } catch (err) { next(err); }
@@ -98,7 +97,6 @@ exports.create = async (req, res, next) => {
 exports.update = async (req, res, next) => {
   try {
     const { title, description, dueDate, priority, status, assignedTo } = req.body;
-    const completedAt = status === 'Done' ? 'NOW()' : null;
     const result = await query(
       `UPDATE tasks SET
          title = COALESCE($1, title),
@@ -109,8 +107,8 @@ exports.update = async (req, res, next) => {
          assigned_to = COALESCE($6, assigned_to),
          completed_at = CASE WHEN $5 = 'Done' THEN NOW() ELSE completed_at END,
          updated_at = NOW()
-       WHERE id = $7 AND deleted_at IS NULL RETURNING *`,
-      [title, description, dueDate, priority, status, assignedTo, req.params.id]
+       WHERE id = $7 AND tenant_id = $8 AND deleted_at IS NULL RETURNING *`,
+      [title, description, dueDate, priority, status, assignedTo, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Task not found' });
     res.json({ data: result.rows[0] });
@@ -119,7 +117,7 @@ exports.update = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    await query('UPDATE tasks SET deleted_at = NOW() WHERE id = $1', [req.params.id]);
+    await query('UPDATE tasks SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
     res.json({ message: 'Task deleted' });
   } catch (err) { next(err); }
 };

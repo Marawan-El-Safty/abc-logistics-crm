@@ -5,13 +5,12 @@ exports.getAll = async (req, res, next) => {
   try {
     const { status, priority, assignedTo, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
     const archived = req.query.archived === 'true';
-    const conditions = ['r.deleted_at IS NULL', `r.is_archived = ${archived}`];
+    const params = [req.tenantId];
+    const conditions = ['r.deleted_at IS NULL', `r.is_archived = ${archived}`, 'r.tenant_id = $1'];
 
     const isManager = ['Admin', 'Sales Manager'].includes(req.user.role_name);
     if (!isManager) {
-      // Non-managers see requests they submitted OR that are assigned to them
       params.push(req.user.id);
       const n = params.length;
       conditions.push(`(r.submitted_by = $${n} OR r.assigned_to = $${n})`);
@@ -45,23 +44,19 @@ exports.getAll = async (req, res, next) => {
 exports.create = async (req, res, next) => {
   try {
     const { title, description, priority, clientId, assignedTo } = req.body;
-    // Build attachment metadata from uploaded files
     const attachments = (req.files || []).map(f => ({
-      filename: f.originalname,
-      storedAs: f.filename,
-      url:      `/uploads/${f.filename}`,
-      size:     f.size,
-      mime:     f.mimetype,
+      filename: f.originalname, storedAs: f.filename, url: `/uploads/${f.filename}`,
+      size: f.size, mime: f.mimetype,
     }));
     const result = await query(
-      `INSERT INTO open_requests (title, description, priority, client_id, submitted_by, assigned_to, attachments)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [title, description, priority || 'Medium', clientId || null, req.user.id, assignedTo || null, JSON.stringify(attachments)]
+      `INSERT INTO open_requests (title, description, priority, client_id, submitted_by, assigned_to, attachments, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [title, description, priority || 'Medium', clientId || null, req.user.id, assignedTo || null, JSON.stringify(attachments), req.tenantId]
     );
-    // Notify all managers and admins
     const managers = await query(
       `SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id
-       WHERE r.name IN ('Admin', 'Sales Manager') AND u.is_active = TRUE`
+       WHERE r.name IN ('Admin', 'Sales Manager') AND u.is_active = TRUE AND u.tenant_id = $1`,
+      [req.tenantId]
     );
     for (const mgr of managers.rows) {
       await createAndPush(mgr.id, 'request_updated', 'New Request Submitted',
@@ -84,12 +79,11 @@ exports.update = async (req, res, next) => {
          resolution = COALESCE($6, resolution),
          closed_at = CASE WHEN $4 = 'Closed' THEN NOW() ELSE closed_at END,
          updated_at = NOW()
-       WHERE id = $7 AND deleted_at IS NULL RETURNING *`,
-      [title, description, priority, status, assignedTo, resolution, req.params.id]
+       WHERE id = $7 AND tenant_id = $8 AND deleted_at IS NULL RETURNING *`,
+      [title, description, priority, status, assignedTo, resolution, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Request not found' });
     const req_ = result.rows[0];
-    // Notify submitter when status changes (if someone else is making the change)
     if (status && req_.submitted_by && req_.submitted_by !== req.user.id) {
       await createAndPush(req_.submitted_by, 'request_updated', 'Request Status Updated',
         `Your request "${req_.title}" is now ${status}`, `/requests?open=${req_.id}`);
@@ -108,8 +102,8 @@ exports.getById = async (req, res, next) => {
          LEFT JOIN users u ON r.submitted_by = u.id
          LEFT JOIN users a ON r.assigned_to = a.id
          LEFT JOIN clients c ON r.client_id = c.id
-         WHERE r.id = $1 AND r.deleted_at IS NULL`,
-        [req.params.id]
+         WHERE r.id = $1 AND r.tenant_id = $2 AND r.deleted_at IS NULL`,
+        [req.params.id, req.tenantId]
       ),
       query(
         `SELECT rr.*, u.full_name AS author_name, ro.name AS role_name
@@ -132,8 +126,8 @@ exports.addReply = async (req, res, next) => {
     if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
 
     const reqResult = await query(
-      'SELECT * FROM open_requests WHERE id = $1 AND deleted_at IS NULL',
-      [req.params.id]
+      'SELECT * FROM open_requests WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL',
+      [req.params.id, req.tenantId]
     );
     if (!reqResult.rows.length) return res.status(404).json({ error: 'Request not found' });
     const request = reqResult.rows[0];
@@ -143,11 +137,11 @@ exports.addReply = async (req, res, next) => {
       [req.params.id, req.user.id, message.trim()]
     );
 
-    // Cross-notify: rep reply → managers; manager reply → submitter
     if (['Sales Rep'].includes(req.user.role_name)) {
       const managers = await query(
         `SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id
-         WHERE r.name IN ('Admin', 'Sales Manager') AND u.is_active = TRUE`
+         WHERE r.name IN ('Admin', 'Sales Manager') AND u.is_active = TRUE AND u.tenant_id = $1`,
+        [req.tenantId]
       );
       for (const mgr of managers.rows) {
         await createAndPush(mgr.id, 'request_updated', 'New Reply on Request',
@@ -158,7 +152,6 @@ exports.addReply = async (req, res, next) => {
         `${req.user.full_name} replied to your request "${request.title}"`, `/requests?open=${req.params.id}`);
     }
 
-    // Return the new reply with author info
     const newReply = await query(
       `SELECT rr.*, u.full_name AS author_name, ro.name AS role_name
        FROM request_replies rr
@@ -174,7 +167,7 @@ exports.addReply = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    await query('UPDATE open_requests SET deleted_at = NOW() WHERE id = $1', [req.params.id]);
+    await query('UPDATE open_requests SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
     res.json({ message: 'Request deleted' });
   } catch (err) { next(err); }
 };
@@ -182,8 +175,8 @@ exports.delete = async (req, res, next) => {
 exports.archive = async (req, res, next) => {
   try {
     const r = await query(
-      'UPDATE open_requests SET is_archived = TRUE WHERE id = $1 AND deleted_at IS NULL RETURNING title',
-      [req.params.id]
+      'UPDATE open_requests SET is_archived = TRUE WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL RETURNING title',
+      [req.params.id, req.tenantId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Request not found' });
     res.json({ data: { archived: true } });
@@ -193,8 +186,8 @@ exports.archive = async (req, res, next) => {
 exports.unarchive = async (req, res, next) => {
   try {
     await query(
-      'UPDATE open_requests SET is_archived = FALSE WHERE id = $1 AND deleted_at IS NULL',
-      [req.params.id]
+      'UPDATE open_requests SET is_archived = FALSE WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL',
+      [req.params.id, req.tenantId]
     );
     res.json({ data: { unarchived: true } });
   } catch (err) { next(err); }

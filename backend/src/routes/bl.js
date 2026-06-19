@@ -1,8 +1,10 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireFeature } = require('../middleware/planGate');
 const ctrl = require('../controllers/blController');
 
 router.use(authenticate);
+router.use(requireFeature('bl_documents'));
 
 const canManageBl = authorize('Admin', 'Operation');
 

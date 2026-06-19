@@ -16,8 +16,8 @@ exports.getAll = async (req, res, next) => {
   try {
     const { status, clientId, leadId, serviceType, direction, from, to, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
-    const conditions = ['q.deleted_at IS NULL'];
+    const params = [req.tenantId];
+    const conditions = ['q.deleted_at IS NULL', 'q.tenant_id = $1'];
 
     if (req.user.role_name === 'Sales Rep') {
       params.push(req.user.id);
@@ -59,8 +59,8 @@ exports.getById = async (req, res, next) => {
        LEFT JOIN clients c ON q.client_id = c.id
        LEFT JOIN users u ON q.created_by = u.id
        LEFT JOIN users a ON q.approved_by = a.id
-       WHERE q.id = $1 AND q.deleted_at IS NULL`,
-      [req.params.id]
+       WHERE q.id = $1 AND q.tenant_id = $2 AND q.deleted_at IS NULL`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Quotation not found' });
 
@@ -83,10 +83,7 @@ exports.create = async (req, res, next) => {
 
     const refNo = generateRef();
     const toNum = (v) => (v === '' || v === undefined || v === null) ? null : v;
-    // For comparison quotations total = sum across all options; for standard use charges
-    const allCharges = options?.length
-      ? options.flatMap(o => o.charges || [])
-      : (charges || []);
+    const allCharges = options?.length ? options.flatMap(o => o.charges || []) : (charges || []);
     const total       = allCharges.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
     const buyingTotal = allCharges.reduce((sum, c) => {
       const qty  = parseFloat(c.qty) || 1;
@@ -99,14 +96,14 @@ exports.create = async (req, res, next) => {
         `INSERT INTO quotations (reference_no, client_id, lead_id, service_type, origin, destination,
            cargo_type, weight, volume, transit_time, free_days, currency, total_amount, buying_total,
            valid_until, notes, created_by, incoterms, incoterm_other, pickup_location, delivery_location,
-           carrier, show_carrier_in_pdf, direction, options)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
+           carrier, show_carrier_in_pdf, direction, options, tenant_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
         [refNo, clientId || null, leadId || null, serviceType, origin, destination,
          cargoType, toNum(weight), toNum(volume), toNum(transitTime), toNum(freeDays),
          currency || 'USD', total, buyingTotal || null, validUntil || null, notes, req.user.id,
          incoterms || null, incotermOther || null, pickupLocation || null, deliveryLocation || null,
          carrier || null, showCarrierInPdf === true, direction || null,
-         options ? JSON.stringify(options) : null]
+         options ? JSON.stringify(options) : null, req.tenantId]
       );
       const q = result.rows[0];
 
@@ -141,9 +138,7 @@ exports.update = async (req, res, next) => {
     } = req.body;
 
     const toNum = (v) => (v === '' || v === undefined || v === null) ? null : v;
-    const allChargesForTotal = options?.length
-      ? options.flatMap(o => o.charges || [])
-      : charges;
+    const allChargesForTotal = options?.length ? options.flatMap(o => o.charges || []) : charges;
     const total       = allChargesForTotal ? allChargesForTotal.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0) : undefined;
     const buyingTotal = allChargesForTotal ? allChargesForTotal.reduce((sum, c) => {
       const qty  = parseFloat(c.qty) || 1;
@@ -152,14 +147,13 @@ exports.update = async (req, res, next) => {
     }, 0) : undefined;
 
     const updated = await withTransaction(async (client) => {
-      // Snapshot current state before overwriting
       const current = await client.query(
         `SELECT q.*, json_agg(qc.*) FILTER (WHERE qc.id IS NOT NULL) AS charges_snapshot
          FROM quotations q
          LEFT JOIN quotation_charges qc ON qc.quotation_id = q.id
-         WHERE q.id = $1 AND q.deleted_at IS NULL
+         WHERE q.id = $1 AND q.tenant_id = $2 AND q.deleted_at IS NULL
          GROUP BY q.id`,
-        [req.params.id]
+        [req.params.id, req.tenantId]
       );
       if (current.rows.length) {
         const snap = current.rows[0];
@@ -201,7 +195,7 @@ exports.update = async (req, res, next) => {
            direction = $24,
            options = $25,
            updated_at = NOW()
-         WHERE id = $21 AND deleted_at IS NULL RETURNING *`,
+         WHERE id = $21 AND tenant_id = $26 AND deleted_at IS NULL RETURNING *`,
         [serviceType, origin, destination, cargoType,
          (weight === '' ? null : weight), (volume === '' ? null : volume),
          (transitTime === '' ? null : transitTime), (freeDays === '' ? null : freeDays),
@@ -210,7 +204,8 @@ exports.update = async (req, res, next) => {
          carrier || null, showCarrierInPdf === true,
          req.params.id,
          clientId || null, leadId || null, direction || null,
-         options !== undefined ? JSON.stringify(options) : null]
+         options !== undefined ? JSON.stringify(options) : null,
+         req.tenantId]
       );
       if (!result.rows.length) return null;
 
@@ -232,7 +227,6 @@ exports.update = async (req, res, next) => {
 
     if (!updated) return res.status(404).json({ error: 'Quotation not found' });
 
-    // Log specific action name for status-only changes (Mark Sent, Reject, etc.)
     const actionLabel = status ? `STATUS_${status.toUpperCase().replace(/\s+/g,'_')}` : 'UPDATE';
     await audit.log(req, { action: actionLabel, entityType: 'quotation', entityId: req.params.id, entityLabel: updated.reference_no });
     res.json({ data: updated });
@@ -244,13 +238,13 @@ exports.approve = async (req, res, next) => {
     const result = await query(
       `UPDATE quotations SET status = 'Approved', approved_by = $1, approved_at = NOW(),
        review_notes = NULL, updated_at = NOW()
-       WHERE id = $2 AND deleted_at IS NULL RETURNING *`,
-      [req.user.id, req.params.id]
+       WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL RETURNING *`,
+      [req.user.id, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Quotation not found' });
     const q = result.rows[0];
     if (q.created_by && q.created_by !== req.user.id) {
-      await createAndPush(q.created_by, 'quotation_status', 'Quotation Approved ✅',
+      await createAndPush(q.created_by, 'quotation_status', 'Quotation Approved',
         `${q.reference_no} was approved and is ready to send`, '/quotations');
     }
     await audit.log(req, { action: 'APPROVE', entityType: 'quotation', entityId: q.id, entityLabel: q.reference_no });
@@ -258,24 +252,23 @@ exports.approve = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Sales Rep submits a Draft quotation for manager review
 exports.submit = async (req, res, next) => {
   try {
     const result = await query(
       `UPDATE quotations SET status = 'Pending Review', updated_at = NOW()
-       WHERE id = $1 AND status = 'Draft' AND deleted_at IS NULL RETURNING *`,
-      [req.params.id]
+       WHERE id = $1 AND tenant_id = $2 AND status = 'Draft' AND deleted_at IS NULL RETURNING *`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Quotation not found or not in Draft status' });
     const q = result.rows[0];
 
-    // Notify all managers + admins
     const managers = await query(
       `SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id
-       WHERE r.name IN ('Admin', 'Sales Manager') AND u.is_active = TRUE`
+       WHERE r.name IN ('Admin', 'Sales Manager') AND u.is_active = TRUE AND u.tenant_id = $1`,
+      [req.tenantId]
     );
     for (const mgr of managers.rows) {
-      await createAndPush(mgr.id, 'quotation_status', 'Quotation Pending Review 🔔',
+      await createAndPush(mgr.id, 'quotation_status', 'Quotation Pending Review',
         `${req.user.full_name} submitted ${q.reference_no} for approval`, '/quotations');
     }
     await audit.log(req, { action: 'SUBMIT', entityType: 'quotation', entityId: q.id, entityLabel: q.reference_no });
@@ -283,59 +276,58 @@ exports.submit = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Client accepted the quotation → mark Confirmed so Operations can book the vessel
 exports.confirm = async (req, res, next) => {
   try {
     const result = await query(
       `UPDATE quotations SET status = 'Confirmed', confirmed_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND deleted_at IS NULL RETURNING *`,
-      [req.params.id]
+       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL RETURNING *`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Quotation not found' });
     const q = result.rows[0];
 
-    // Notify the Operations team (+ admins) that a booking is ready
     const ops = await query(
       `SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id
-       WHERE r.name IN ('Operation', 'Admin') AND u.is_active = TRUE`
+       WHERE r.name IN ('Operation', 'Admin') AND u.is_active = TRUE AND u.tenant_id = $1`,
+      [req.tenantId]
     );
     for (const op of ops.rows) {
       if (op.id === req.user.id) continue;
-      await createAndPush(op.id, 'quotation_status', 'Booking Confirmed 🚢',
-        `${q.reference_no} confirmed by client — ready to book${q.carrier ? ` (${q.carrier})` : ''}`, '/operations');
+      await createAndPush(op.id, 'quotation_status', 'Booking Confirmed',
+        `${q.reference_no} confirmed by client — ready to book`, '/operations');
     }
     await audit.log(req, { action: 'CONFIRM', entityType: 'quotation', entityId: q.id, entityLabel: q.reference_no });
 
-    // Auto-create a shipment booking for Operations (once per quotation)
-    const existing = await query('SELECT 1 FROM shipments WHERE quotation_id = $1 AND deleted_at IS NULL', [q.id]);
+    const existing = await query(
+      'SELECT 1 FROM shipments WHERE quotation_id = $1 AND tenant_id = $2 AND deleted_at IS NULL',
+      [q.id, req.tenantId]
+    );
     if (!existing.rows.length) {
       await query(
-        `INSERT INTO shipments (reference, direction, shipping_line, client_id, pol, pod, status, quotation_id, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,'Booked',$7,$8)`,
+        `INSERT INTO shipments (reference, direction, shipping_line, client_id, pol, pod, status, quotation_id, created_by, tenant_id)
+         VALUES ($1,$2,$3,$4,$5,$6,'Booked',$7,$8,$9)`,
         [q.reference_no, q.direction || null, q.carrier || null, q.client_id || null,
-         q.origin || null, q.destination || null, q.id, req.user.id]
+         q.origin || null, q.destination || null, q.id, req.user.id, req.tenantId]
       );
     }
     res.json({ data: q });
   } catch (err) { next(err); }
 };
 
-// Manager returns a quotation to the Sales Rep for revision
 exports.returnForRevision = async (req, res, next) => {
   try {
     const { notes } = req.body;
     const result = await query(
       `UPDATE quotations SET status = 'Draft', review_notes = $1, updated_at = NOW()
-       WHERE id = $2 AND deleted_at IS NULL RETURNING *`,
-      [notes || null, req.params.id]
+       WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL RETURNING *`,
+      [notes || null, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Quotation not found' });
     const q = result.rows[0];
 
-    // Notify the creator
     if (q.created_by && q.created_by !== req.user.id) {
       await createAndPush(q.created_by, 'quotation_status', 'Quotation Returned for Revision',
-        `${req.user.full_name} returned ${q.reference_no}${notes ? ': ' + notes.slice(0, 80) : ''}`, '/quotations');
+        `${req.user.full_name} returned ${q.reference_no}`, '/quotations');
     }
     await audit.log(req, { action: 'RETURN', entityType: 'quotation', entityId: q.id, entityLabel: q.reference_no, details: notes ? { notes } : null });
     res.json({ data: q });
@@ -350,13 +342,11 @@ exports.generatePdf = async (req, res, next) => {
        FROM quotations q
        LEFT JOIN clients c ON q.client_id = c.id
        LEFT JOIN users u ON q.created_by = u.id
-       WHERE q.id = $1`,
-      [req.params.id]
+       WHERE q.id = $1 AND q.tenant_id = $2`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Quotation not found' });
 
-    // Sales Reps and Finance may only download the PDF once a manager/admin has
-    // approved the quotation. Operation, Sales Manager and Admin can download any time.
     const APPROVED_STATUSES = ['Approved', 'Sent', 'Confirmed'];
     const role = req.user.role_name;
     if ((role === 'Sales Rep' || role === 'Finance') && !APPROVED_STATUSES.includes(result.rows[0].status)) {
@@ -366,7 +356,7 @@ exports.generatePdf = async (req, res, next) => {
     const charges = await query('SELECT * FROM quotation_charges WHERE quotation_id = $1', [req.params.id]);
     const quotation = { ...result.rows[0], charges: charges.rows };
 
-    const settings = await loadSettings();
+    const settings = await loadSettings(req.tenantId);
     const isComparison = Array.isArray(quotation.options) && quotation.options.length > 1;
     const pdfBuffer = isComparison
       ? await generateComparisonPdf(quotation, settings)
@@ -379,6 +369,10 @@ exports.generatePdf = async (req, res, next) => {
 
 exports.getVersions = async (req, res, next) => {
   try {
+    // Verify access
+    const check = await query('SELECT id FROM quotations WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+    if (!check.rows.length) return res.status(404).json({ error: 'Quotation not found' });
+
     const result = await query(
       `SELECT id, version_no, changed_by_name, created_at,
               snapshot->>'status' AS status,
@@ -395,7 +389,11 @@ exports.getVersions = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    const r = await query('UPDATE quotations SET deleted_at = NOW() WHERE id = $1 RETURNING reference_no', [req.params.id]);
+    const r = await query(
+      'UPDATE quotations SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2 RETURNING reference_no',
+      [req.params.id, req.tenantId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Quotation not found' });
     await audit.log(req, { action: 'DELETE', entityType: 'quotation', entityId: req.params.id, entityLabel: r.rows[0]?.reference_no });
     res.json({ message: 'Quotation deleted' });
   } catch (err) { next(err); }

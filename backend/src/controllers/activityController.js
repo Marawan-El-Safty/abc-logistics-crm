@@ -4,8 +4,8 @@ exports.getAll = async (req, res, next) => {
   try {
     const { clientId, leadId, type, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
-    const conditions = [];
+    const params = [req.tenantId];
+    const conditions = ['a.tenant_id = $1'];
 
     if (req.user.role_name === 'Sales Rep') {
       params.push(req.user.id);
@@ -15,7 +15,7 @@ exports.getAll = async (req, res, next) => {
     if (leadId) { params.push(leadId); conditions.push(`a.lead_id = $${params.length}`); }
     if (type) { params.push(type); conditions.push(`a.activity_type = $${params.length}::activity_type`); }
 
-    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
     const countResult = await query(`SELECT COUNT(*) FROM activities a ${whereClause}`, params);
     const total = parseInt(countResult.rows[0].count);
 
@@ -39,10 +39,11 @@ exports.getAll = async (req, res, next) => {
 
 exports.getTodayFollowUps = async (req, res, next) => {
   try {
-    const params = [];
+    const params = [req.tenantId];
     const conditions = [
-      `a.next_follow_up >= NOW()::date`,
-      `a.next_follow_up < (NOW()::date + INTERVAL '1 day')`
+      'a.tenant_id = $1',
+      'a.next_follow_up >= NOW()::date',
+      "a.next_follow_up < (NOW()::date + INTERVAL '1 day')",
     ];
 
     if (req.user.role_name === 'Sales Rep') {
@@ -69,10 +70,10 @@ exports.create = async (req, res, next) => {
   try {
     const { activityType, clientId, leadId, activityDate, notes, outcome, nextFollowUp, followUpNotes } = req.body;
     const result = await query(
-      `INSERT INTO activities (activity_type, client_id, lead_id, performed_by, activity_date, notes, outcome, next_follow_up, follow_up_notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO activities (activity_type, client_id, lead_id, performed_by, activity_date, notes, outcome, next_follow_up, follow_up_notes, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [activityType, clientId || null, leadId || null, req.user.id,
-       activityDate || new Date(), notes, outcome, nextFollowUp || null, followUpNotes]
+       activityDate || new Date(), notes, outcome, nextFollowUp || null, followUpNotes, req.tenantId]
     );
     res.status(201).json({ data: result.rows[0] });
   } catch (err) { next(err); }
@@ -90,8 +91,8 @@ exports.update = async (req, res, next) => {
          next_follow_up = COALESCE($5, next_follow_up),
          follow_up_notes = COALESCE($6, follow_up_notes),
          updated_at = NOW()
-       WHERE id = $7 RETURNING *`,
-      [activityType, activityDate, notes, outcome, nextFollowUp, followUpNotes, req.params.id]
+       WHERE id = $7 AND tenant_id = $8 RETURNING *`,
+      [activityType, activityDate, notes, outcome, nextFollowUp, followUpNotes, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Activity not found' });
     res.json({ data: result.rows[0] });
@@ -100,7 +101,7 @@ exports.update = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    await query('DELETE FROM activities WHERE id = $1', [req.params.id]);
+    await query('DELETE FROM activities WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
     res.json({ message: 'Activity deleted' });
   } catch (err) { next(err); }
 };
@@ -109,8 +110,8 @@ exports.markDone = async (req, res, next) => {
   try {
     const result = await query(
       `UPDATE activities SET next_follow_up = NULL, follow_up_notes = NULL, updated_at = NOW()
-       WHERE id = $1 RETURNING *`,
-      [req.params.id]
+       WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Activity not found' });
     res.json({ data: result.rows[0] });

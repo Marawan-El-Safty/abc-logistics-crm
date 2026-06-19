@@ -3,7 +3,8 @@ const { query } = require('../config/db');
 exports.getAll = async (req, res, next) => {
   try {
     const result = await query(
-      `SELECT * FROM bank_accounts ORDER BY currency, account_name`
+      `SELECT * FROM bank_accounts WHERE tenant_id = $1 ORDER BY currency, account_name`,
+      [req.tenantId]
     );
     res.json({ data: result.rows });
   } catch (err) { next(err); }
@@ -11,7 +12,10 @@ exports.getAll = async (req, res, next) => {
 
 exports.getById = async (req, res, next) => {
   try {
-    const result = await query(`SELECT * FROM bank_accounts WHERE id = $1`, [req.params.id]);
+    const result = await query(
+      `SELECT * FROM bank_accounts WHERE id = $1 AND tenant_id = $2`,
+      [req.params.id, req.tenantId]
+    );
     if (!result.rows.length) return res.status(404).json({ error: 'Bank account not found' });
     res.json({ data: result.rows[0] });
   } catch (err) { next(err); }
@@ -22,10 +26,10 @@ exports.create = async (req, res, next) => {
     const { accountName, accountNumber, currency, iban, bankName, bankAddress, swiftCode, notes } = req.body;
     const result = await query(
       `INSERT INTO bank_accounts
-         (account_name, account_number, currency, iban, bank_name, bank_address, swift_code, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+         (account_name, account_number, currency, iban, bank_name, bank_address, swift_code, notes, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [accountName, accountNumber || null, currency || 'USD',
-       iban || null, bankName || null, bankAddress || null, swiftCode || null, notes || null]
+       iban || null, bankName || null, bankAddress || null, swiftCode || null, notes || null, req.tenantId]
     );
     res.status(201).json({ data: result.rows[0] });
   } catch (err) { next(err); }
@@ -45,11 +49,11 @@ exports.update = async (req, res, next) => {
          swift_code     = COALESCE($7, swift_code),
          notes          = COALESCE($8, notes),
          is_active      = COALESCE($9, is_active)
-       WHERE id = $10 RETURNING *`,
+       WHERE id = $10 AND tenant_id = $11 RETURNING *`,
       [accountName || null, accountNumber ?? null, currency || null,
        iban ?? null, bankName ?? null, bankAddress ?? null, swiftCode ?? null,
        notes ?? null, isActive ?? null,
-       req.params.id]
+       req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Bank account not found' });
     res.json({ data: result.rows[0] });
@@ -58,15 +62,14 @@ exports.update = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    // Check if any invoices reference this account
     const refs = await query(
-      `SELECT COUNT(*) FROM invoices WHERE bank_account_id = $1 AND deleted_at IS NULL`,
-      [req.params.id]
+      `SELECT COUNT(*) FROM invoices WHERE bank_account_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [req.params.id, req.tenantId]
     );
     if (parseInt(refs.rows[0].count) > 0) {
       return res.status(400).json({ error: 'Cannot delete: bank account is used by one or more invoices' });
     }
-    await query(`DELETE FROM bank_accounts WHERE id = $1`, [req.params.id]);
+    await query(`DELETE FROM bank_accounts WHERE id = $1 AND tenant_id = $2`, [req.params.id, req.tenantId]);
     res.json({ message: 'Bank account deleted' });
   } catch (err) { next(err); }
 };

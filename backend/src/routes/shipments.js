@@ -2,11 +2,11 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const validate = require('../middleware/validate');
 const { authenticate, authorize } = require('../middleware/auth');
+const { enforceLimit } = require('../middleware/planGate');
 const ctrl = require('../controllers/shipmentController');
 
 router.use(authenticate);
 
-// Read for operations-capable roles
 const canView = authorize('Admin', 'Sales Manager', 'Operation');
 
 const opt = { nullable: true, checkFalsy: true };
@@ -17,7 +17,7 @@ const shipmentRules = [
 ];
 
 router.get('/',        canView, ctrl.getAll);
-router.post('/',       canView, shipmentRules, validate, ctrl.create);
+router.post('/',       canView, enforceLimit('shipments_per_month'), shipmentRules, validate, ctrl.create);
 router.post('/import', canView, body('shipments').isArray({ min: 1 }).withMessage('No rows to import'), validate, ctrl.importRows);
 router.put('/:id',         canView, shipmentRules, validate, ctrl.update);
 router.put('/:id/archive', canView, ctrl.archive);

@@ -1,9 +1,11 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireFeature } = require('../middleware/planGate');
 const ctrl = require('../controllers/salesInvoiceController');
 
 router.use(authenticate);
 router.use(authorize('Admin', 'Sales Manager', 'Sales Rep'));
+router.use(requireFeature('sales_invoices'));
 
 router.get('/',        ctrl.getAll);
 router.post('/',       ctrl.create);

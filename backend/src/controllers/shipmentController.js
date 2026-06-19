@@ -1,7 +1,6 @@
 const { query, withTransaction } = require('../config/db');
 const audit = require('./auditController');
 
-// Columns a client may set; maps camelCase body keys → db columns
 const FIELDS = {
   reference:     'reference',
   externalRef:   'external_ref',
@@ -30,12 +29,11 @@ const FIELDS = {
 const norm = (col, val) => {
   if (val === '' || val === undefined || val === null) return null;
   if (col === 'container_qty') return parseInt(val) || null;
-  // Date columns: accept YYYY-MM-DD or DD/MM/YYYY, reject anything else silently
   if (col === 'etd' || col === 'eta' || col === 'loading_date') {
     if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
     const dmy = val.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
-    return null; // not a recognisable date — skip rather than crash
+    return null;
   }
   return val;
 };
@@ -43,10 +41,9 @@ const norm = (col, val) => {
 exports.getAll = async (req, res, next) => {
   try {
     const { direction, status, search, archived } = req.query;
-    const params = [];
-    const conditions = ['s.deleted_at IS NULL'];
+    const params = [req.tenantId];
+    const conditions = ['s.deleted_at IS NULL', 's.tenant_id = $1'];
 
-    // Default: hide archived. Pass ?archived=true to show only archived.
     if (archived === 'true') {
       conditions.push('s.is_archived = TRUE');
     } else {
@@ -81,18 +78,17 @@ exports.getAll = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
-    // Avoid duplicates when converting/confirming the same quotation twice
     if (req.body.quotationId) {
       const dup = await query(
-        'SELECT * FROM shipments WHERE quotation_id = $1 AND deleted_at IS NULL LIMIT 1',
-        [req.body.quotationId]
+        'SELECT * FROM shipments WHERE quotation_id = $1 AND tenant_id = $2 AND deleted_at IS NULL LIMIT 1',
+        [req.body.quotationId, req.tenantId]
       );
       if (dup.rows.length) return res.status(200).json({ data: dup.rows[0], existing: true });
     }
 
-    const cols = ['created_by'];
-    const vals = [req.user.id];
-    const placeholders = ['$1'];
+    const cols = ['created_by', 'tenant_id'];
+    const vals = [req.user.id, req.tenantId];
+    const placeholders = ['$1', '$2'];
 
     for (const [key, col] of Object.entries(FIELDS)) {
       if (req.body[key] !== undefined) {
@@ -124,10 +120,10 @@ exports.update = async (req, res, next) => {
     }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
 
-    vals.push(req.params.id);
+    vals.push(req.params.id, req.tenantId);
     const result = await query(
       `UPDATE shipments SET ${sets.join(', ')}, updated_at = NOW()
-       WHERE id = $${vals.length} AND deleted_at IS NULL RETURNING *`,
+       WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length} AND deleted_at IS NULL RETURNING *`,
       vals
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Shipment not found' });
@@ -137,10 +133,10 @@ exports.update = async (req, res, next) => {
 
 exports.archive = async (req, res, next) => {
   try {
-    const archive = req.body.archive !== false; // default true
+    const archive = req.body.archive !== false;
     const r = await query(
-      'UPDATE shipments SET is_archived = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL RETURNING reference, booking_no',
-      [archive, req.params.id]
+      'UPDATE shipments SET is_archived = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL RETURNING reference, booking_no',
+      [archive, req.params.id, req.tenantId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Shipment not found' });
     await audit.log(req, { action: archive ? 'ARCHIVE' : 'UNARCHIVE', entityType: 'shipment', entityId: req.params.id, entityLabel: r.rows[0].reference || r.rows[0].booking_no });
@@ -150,27 +146,28 @@ exports.archive = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    const r = await query('UPDATE shipments SET deleted_at = NOW() WHERE id = $1 RETURNING reference, booking_no', [req.params.id]);
+    const r = await query(
+      'UPDATE shipments SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2 RETURNING reference, booking_no',
+      [req.params.id, req.tenantId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Shipment not found' });
     await audit.log(req, { action: 'DELETE', entityType: 'shipment', entityId: req.params.id, entityLabel: r.rows[0]?.reference || r.rows[0]?.booking_no });
     res.json({ message: 'Shipment deleted' });
   } catch (err) { next(err); }
 };
 
-// Bulk import from a CSV upload (array of camelCase shipment objects)
 exports.importRows = async (req, res, next) => {
   try {
     const { shipments } = req.body;
     if (!Array.isArray(shipments) || !shipments.length) {
       return res.status(400).json({ error: 'No rows to import' });
     }
-    // All-or-nothing: a bad row rolls back the whole import so the user
-    // re-uploads a clean file rather than chasing a half-imported sheet.
     const imported = await withTransaction(async (client) => {
       let count = 0;
       for (const s of shipments) {
-        const cols = ['created_by'];
-        const vals = [req.user.id];
-        const ph   = ['$1'];
+        const cols = ['created_by', 'tenant_id'];
+        const vals = [req.user.id, req.tenantId];
+        const ph   = ['$1', '$2'];
         for (const [key, col] of Object.entries(FIELDS)) {
           if (s[key] !== undefined && s[key] !== '') {
             vals.push(norm(col, s[key]));
@@ -178,8 +175,7 @@ exports.importRows = async (req, res, next) => {
             ph.push(`$${vals.length}`);
           }
         }
-        // Skip completely empty rows
-        if (cols.length <= 1) continue;
+        if (cols.length <= 2) continue;
         await client.query(`INSERT INTO shipments (${cols.join(', ')}) VALUES (${ph.join(', ')})`, vals);
         count++;
       }

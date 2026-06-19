@@ -1,7 +1,5 @@
 const { Pool } = require('pg');
 
-// Railway Hobby allows ~25 total DB connections.
-// Reserve 8 for the app pool, leaving headroom for admin queries and SSE connections.
 const POOL_MAX = parseInt(process.env.DB_POOL_MAX) || 8;
 
 const pool = new Pool(
@@ -32,9 +30,6 @@ const query = (text, params) => pool.query(text, params);
 
 const getClient = () => pool.connect();
 
-// Run fn inside a single transaction. fn receives a dedicated client whose
-// .query() must be used for every statement so they share the transaction.
-// Commits on success, rolls back on any thrown error, always releases.
 const withTransaction = async (fn) => {
   const client = await pool.connect();
   try {
@@ -50,4 +45,20 @@ const withTransaction = async (fn) => {
   }
 };
 
-module.exports = { query, getClient, withTransaction, pool };
+// CRIT-1: Improved tenantQuery — strips SQL comments before checking for
+// tenant_id so the check cannot be fooled by a tenant_id in a comment or
+// string literal. Also requires tenantId to be non-null.
+const tenantQuery = (tenantId, sql, params) => {
+  if (!tenantId) throw new Error('tenantQuery: tenantId required');
+  // Strip single-line (--) and block (/* */) comments before checking
+  const normalized = sql
+    .replace(/--[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .toLowerCase();
+  if (!normalized.includes('tenant_id')) {
+    throw new Error('tenantQuery: sql missing tenant_id filter');
+  }
+  return pool.query(sql, params);
+};
+
+module.exports = { query, getClient, withTransaction, pool, tenantQuery };

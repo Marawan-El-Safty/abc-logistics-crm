@@ -16,8 +16,8 @@ exports.getAll = async (req, res, next) => {
   try {
     const { stage, source, assignedTo, search, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
-    const conditions = ['l.deleted_at IS NULL'];
+    const params = [req.tenantId];
+    const conditions = ['l.deleted_at IS NULL', 'l.tenant_id = $1'];
 
     if (stage) { params.push(stage); conditions.push(`l.stage = $${params.length}::lead_stage`); }
     if (source) { params.push(source); conditions.push(`l.source = $${params.length}::lead_source`); }
@@ -52,16 +52,16 @@ exports.getById = async (req, res, next) => {
        FROM leads l
        LEFT JOIN users u ON l.assigned_to = u.id
        LEFT JOIN users c ON l.created_by = c.id
-       WHERE l.id = $1 AND l.deleted_at IS NULL`,
-      [req.params.id]
+       WHERE l.id = $1 AND l.tenant_id = $2 AND l.deleted_at IS NULL`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Lead not found' });
 
     const activities = await query(
       `SELECT a.*, u.full_name AS performed_by_name FROM activities a
        LEFT JOIN users u ON a.performed_by = u.id
-       WHERE a.lead_id = $1 ORDER BY a.activity_date DESC`,
-      [req.params.id]
+       WHERE a.lead_id = $1 AND a.tenant_id = $2 ORDER BY a.activity_date DESC`,
+      [req.params.id, req.tenantId]
     );
 
     res.json({ data: { ...result.rows[0], activities: activities.rows } });
@@ -78,10 +78,10 @@ exports.create = async (req, res, next) => {
     const assignee = isRepRole(req.user) ? req.user.id : (assignedTo || req.user.id);
     const result = await query(
       `INSERT INTO leads (contact_name, company_name, email, phone, shipment_type, origin, destination,
-         cargo_details, weight, volume, notes, assigned_to, created_by, source, stage_new_lead_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW()) RETURNING *`,
+         cargo_details, weight, volume, notes, assigned_to, created_by, source, stage_new_lead_at, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),$15) RETURNING *`,
       [contactName, companyName, email, phone, shipmentType || null, origin, destination,
-       cargoDetails, toNum(weight), toNum(volume), notes, assignee, req.user.id, source || 'Manual Entry']
+       cargoDetails, toNum(weight), toNum(volume), notes, assignee, req.user.id, source || 'Manual Entry', req.tenantId]
     );
     res.status(201).json({ data: result.rows[0] });
   } catch (err) { next(err); }
@@ -91,19 +91,29 @@ exports.createInbound = async (req, res, next) => {
   try {
     const {
       fullName, companyName, email, phone, shipmentType, origin, destination,
-      cargoDetails, weight, volume, notes
+      cargoDetails, weight, volume, notes, tenantSlug
     } = req.body;
 
-    // Find manager to assign to
-    const mgr = await query(`SELECT id FROM users u JOIN roles r ON u.role_id = r.id WHERE r.name = 'Sales Manager' AND u.is_active = TRUE LIMIT 1`);
+    // Resolve tenant by slug for public-facing form
+    let tenantId = req.tenantId;
+    if (!tenantId && tenantSlug) {
+      const t = await query('SELECT id FROM tenants WHERE slug = $1', [tenantSlug]);
+      tenantId = t.rows[0]?.id || null;
+    }
+
+    const mgr = await query(
+      `SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id
+       WHERE r.name = 'Sales Manager' AND u.is_active = TRUE AND u.tenant_id = $1 LIMIT 1`,
+      [tenantId]
+    );
     const assignedTo = mgr.rows[0]?.id || null;
 
     const result = await query(
       `INSERT INTO leads (contact_name, company_name, email, phone, shipment_type, origin, destination,
-         cargo_details, weight, volume, notes, assigned_to, created_by, source, stage_new_lead_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,NOW()) RETURNING *`,
+         cargo_details, weight, volume, notes, assigned_to, created_by, source, stage_new_lead_at, tenant_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,NOW(),$14) RETURNING *`,
       [fullName, companyName, email, phone, shipmentType, origin, destination,
-       cargoDetails, weight, volume, notes, assignedTo, 'Website Form']
+       cargoDetails, weight, volume, notes, assignedTo, 'Website Form', tenantId]
     );
 
     res.status(201).json({ data: result.rows[0], message: 'Lead created from website form' });
@@ -132,9 +142,9 @@ exports.update = async (req, res, next) => {
          notes = COALESCE($11, notes),
          assigned_to = COALESCE($12, assigned_to),
          updated_at = NOW()
-       WHERE id = $13 AND deleted_at IS NULL RETURNING *`,
+       WHERE id = $13 AND tenant_id = $14 AND deleted_at IS NULL RETURNING *`,
       [contactName, companyName, email, phone, shipmentType || null, origin, destination,
-       cargoDetails, toNum(weight), toNum(volume), notes, assignedTo, req.params.id]
+       cargoDetails, toNum(weight), toNum(volume), notes, assignedTo, req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Lead not found' });
     res.json({ data: result.rows[0] });
@@ -155,20 +165,19 @@ exports.updateStage = async (req, res, next) => {
       updateFields += `, lost_reason = $${params.length}`;
     }
 
-    params.push(req.params.id);
+    params.push(req.params.id, req.tenantId);
     const result = await query(
-      `UPDATE leads SET ${updateFields} WHERE id = $${params.length} AND deleted_at IS NULL RETURNING *`,
+      `UPDATE leads SET ${updateFields} WHERE id = $${params.length - 1} AND tenant_id = $${params.length} AND deleted_at IS NULL RETURNING *`,
       params
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Lead not found' });
 
-    // Auto-convert to client if Won
     if (stage === 'Won') {
       const lead = result.rows[0];
       const clientResult = await query(
-        `INSERT INTO clients (company_name, country, assigned_to, created_by)
-         VALUES ($1, $2, $3, $4) RETURNING id`,
-        [lead.company_name || lead.contact_name, null, lead.assigned_to, lead.created_by]
+        `INSERT INTO clients (company_name, country, assigned_to, created_by, tenant_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [lead.company_name || lead.contact_name, null, lead.assigned_to, lead.created_by, req.tenantId]
       );
       const clientId = clientResult.rows[0].id;
 
@@ -194,7 +203,11 @@ exports.updateStage = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    const r = await query('UPDATE leads SET deleted_at = NOW() WHERE id = $1 RETURNING company_name', [req.params.id]);
+    const r = await query(
+      'UPDATE leads SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2 RETURNING company_name',
+      [req.params.id, req.tenantId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Lead not found' });
     await audit.log(req, { action: 'DELETE', entityType: 'lead', entityId: req.params.id, entityLabel: r.rows[0]?.company_name });
     res.json({ message: 'Lead deleted' });
   } catch (err) { next(err); }
@@ -223,8 +236,8 @@ exports.importCsv = async (req, res, next) => {
       if (!contactName) { skipped++; continue; }
       try {
         await query(
-          `INSERT INTO leads (contact_name, company_name, email, phone, shipment_type, origin, destination, notes, assigned_to, created_by, source, stage_new_lead_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'CSV Import',NOW())`,
+          `INSERT INTO leads (contact_name, company_name, email, phone, shipment_type, origin, destination, notes, assigned_to, created_by, source, stage_new_lead_at, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'CSV Import',NOW(),$11)`,
           [
             contactName,
             getCol(row, 'company_name', 'company'),
@@ -236,6 +249,7 @@ exports.importCsv = async (req, res, next) => {
             getCol(row, 'notes'),
             req.user.id,
             req.user.id,
+            req.tenantId,
           ]
         );
         imported++;

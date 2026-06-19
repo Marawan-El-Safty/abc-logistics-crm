@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const validate = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
+const { enforceLimit } = require('../middleware/planGate');
 const ctrl = require('../controllers/clientController');
 const contractCtrl = require('../controllers/contractController');
 const multer = require('multer');
@@ -27,6 +28,7 @@ router.use(authenticate);
 
 router.get('/', ctrl.getAll);
 router.post('/',
+  enforceLimit('clients'),
   body('companyName').trim().notEmpty().withMessage('Company name is required'),
   body('email').optional({ nullable: true, checkFalsy: true }).isEmail().withMessage('Invalid email'),
   validate,
@@ -42,16 +44,13 @@ router.put('/:id',
 );
 router.delete('/:id', ctrl.delete);
 
-// Contacts
 router.post('/:id/contacts', ctrl.addContact);
 router.put('/:id/contacts/:contactId', ctrl.updateContact);
 router.delete('/:id/contacts/:contactId', ctrl.deleteContact);
 
-// Branches
 router.post('/:id/branches', ctrl.addBranch);
 router.delete('/:id/branches/:branchId', ctrl.deleteBranch);
 
-// Contracts
 router.get('/:clientId/contracts', contractCtrl.getByClient);
 router.post('/:clientId/contracts', upload.single('file'), contractCtrl.upload);
 router.delete('/:clientId/contracts/:contractId', contractCtrl.delete);

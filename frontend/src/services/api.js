@@ -78,6 +78,12 @@ api.interceptors.response.use(
       return Promise.reject(new Error('You are offline. Request queued.'));
     }
 
+    // UX-6: Persist suspended state so Layout can show a permanent banner
+    if (error.response?.status === 403 && error.response?.data?.error === 'account_suspended') {
+      localStorage.setItem('account_status', 'suspended');
+      window.dispatchEvent(new Event('account-suspended'));
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

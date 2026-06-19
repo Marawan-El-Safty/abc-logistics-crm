@@ -11,7 +11,6 @@ const generateInvNo = () => {
   return `INV-${year}${month}-${rand}`;
 };
 
-// Full invoice row with all joined data (used by getById + generatePdf)
 const FULL_SELECT = `
   SELECT i.*,
     c.company_name AS client_name,
@@ -35,23 +34,14 @@ const FULL_SELECT = `
   LEFT JOIN bank_accounts ba ON i.bank_account_id = ba.id
 `;
 
-// Helper: insert charge rows for an invoice. `db` is a transaction client
-// (or the pool) so callers can run this inside a transaction.
 async function insertCharges(db, invoiceId, charges) {
   for (const ch of charges) {
     await db.query(
-      `INSERT INTO invoice_charges
-         (invoice_id, description, category, qty, unit_rate, amount, currency)
+      `INSERT INTO invoice_charges (invoice_id, description, category, qty, unit_rate, amount, currency)
        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        invoiceId,
-        ch.description,
-        ch.category  || 'Freight',
-        ch.qty       || 1,
-        ch.unitRate  != null ? parseFloat(ch.unitRate) : null,
-        parseFloat(ch.amount),
-        ch.currency  || 'USD',
-      ]
+      [invoiceId, ch.description, ch.category || 'Freight', ch.qty || 1,
+       ch.unitRate != null ? parseFloat(ch.unitRate) : null,
+       parseFloat(ch.amount), ch.currency || 'USD']
     );
   }
 }
@@ -60,8 +50,8 @@ exports.getAll = async (req, res, next) => {
   try {
     const { clientId, paymentStatus, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    const params = [];
-    const conditions = ['i.deleted_at IS NULL'];
+    const params = [req.tenantId];
+    const conditions = ['i.deleted_at IS NULL', 'i.tenant_id = $1'];
 
     if (clientId) { params.push(clientId); conditions.push(`i.client_id = $${params.length}`); }
     if (paymentStatus) { params.push(paymentStatus); conditions.push(`i.payment_status = $${params.length}::payment_status`); }
@@ -80,10 +70,10 @@ exports.getAll = async (req, res, next) => {
       params
     );
 
-    // Mark overdue
     await query(
       `UPDATE invoices SET payment_status = 'Overdue'
-       WHERE payment_status = 'Pending' AND due_date < NOW()::date AND deleted_at IS NULL`
+       WHERE payment_status = 'Pending' AND due_date < NOW()::date AND deleted_at IS NULL AND tenant_id = $1`,
+      [req.tenantId]
     );
 
     res.json({ data: result.rows });
@@ -93,14 +83,12 @@ exports.getAll = async (req, res, next) => {
 exports.getById = async (req, res, next) => {
   try {
     const result = await query(
-      `${FULL_SELECT} WHERE i.id = $1 AND i.deleted_at IS NULL`,
-      [req.params.id]
+      `${FULL_SELECT} WHERE i.id = $1 AND i.tenant_id = $2 AND i.deleted_at IS NULL`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Invoice not found' });
 
     const inv = result.rows[0];
-
-    // Attach invoice-level charges (for standalone invoices)
     const chargesRes = await query(
       `SELECT * FROM invoice_charges WHERE invoice_id = $1 ORDER BY created_at`,
       [inv.id]
@@ -119,22 +107,20 @@ exports.create = async (req, res, next) => {
       pol, pod, containerType, containerQty, cargoType, shipmentType, customInvoiceNo, bankAccountId, charges,
     } = req.body;
 
-    // Use quotation's reference number as invoice number when linked.
-    // If that number is already taken (multiple invoices per quotation),
-    // append a counter suffix: REF-2, REF-3, …
     let invNo = generateInvNo();
     let resolvedClientId = clientId;
     if (quotationId) {
-      const qRes = await query('SELECT reference_no, client_id FROM quotations WHERE id = $1', [quotationId]);
+      const qRes = await query(
+        'SELECT reference_no, client_id FROM quotations WHERE id = $1 AND tenant_id = $2',
+        [quotationId, req.tenantId]
+      );
       if (qRes.rows.length) {
         const baseRef = qRes.rows[0].reference_no;
         if (!resolvedClientId) resolvedClientId = qRes.rows[0].client_id;
-
-        // Count existing invoices that already use this reference (exact or suffixed)
         const taken = await query(
           `SELECT invoice_no FROM invoices
-           WHERE (invoice_no = $1 OR invoice_no LIKE $2) AND deleted_at IS NULL`,
-          [baseRef, `${baseRef}-%`]
+           WHERE (invoice_no = $1 OR invoice_no LIKE $2) AND tenant_id = $3 AND deleted_at IS NULL`,
+          [baseRef, `${baseRef}-%`, req.tenantId]
         );
         invNo = taken.rows.length === 0 ? baseRef : `${baseRef}-${taken.rows.length + 1}`;
       }
@@ -146,24 +132,18 @@ exports.create = async (req, res, next) => {
            (client_id, quotation_id, invoice_no, custom_invoice_no, description, amount, currency,
             due_date, notes, created_by, buying_total,
             bl_number, vessel, shipping_line, client_vat,
-            pol, pod, container_type, container_qty, cargo_type, shipment_type, bank_account_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+            pol, pod, container_type, container_qty, cargo_type, shipment_type, bank_account_id, tenant_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
         [
           resolvedClientId, quotationId || null, invNo, customInvoiceNo || null, description, amount,
           currency || 'USD', dueDate, notes, req.user.id, buyingTotal || null,
           blNumber || null, vessel || null, shippingLine || null, clientVat || null,
           pol || null, pod || null, containerType || null, containerQty || null, cargoType || null, shipmentType || null,
-          bankAccountId || null,
+          bankAccountId || null, req.tenantId,
         ]
       );
       const row = result.rows[0];
-
-      // Save line-item charges (for both standalone and quotation-linked invoices).
-      // When linked, the charges are typically prefilled from the quotation but
-      // the user may have edited them, so we always persist what was submitted.
-      if (charges?.length) {
-        await insertCharges(client, row.id, charges);
-      }
+      if (charges?.length) await insertCharges(client, row.id, charges);
       return row;
     });
 
@@ -204,7 +184,7 @@ exports.update = async (req, res, next) => {
            shipment_type     = COALESCE($20, shipment_type),
            paid_at           = CASE WHEN $5 = 'Paid' THEN NOW() ELSE paid_at END,
            updated_at        = NOW()
-         WHERE id = $19 AND deleted_at IS NULL RETURNING *`,
+         WHERE id = $19 AND tenant_id = $21 AND deleted_at IS NULL RETURNING *`,
         [
           description, amount, currency, dueDate, paymentStatus, notes,
           buyingTotal ?? null, blNumber ?? null, vessel ?? null,
@@ -214,16 +194,14 @@ exports.update = async (req, res, next) => {
           bankAccountId ?? null,
           req.params.id,
           shipmentType ?? null,
+          req.tenantId,
         ]
       );
       if (!result.rows.length) return null;
 
-      // Replace line-item charges if provided (standalone invoices only)
       if (charges !== undefined) {
         await client.query('DELETE FROM invoice_charges WHERE invoice_id = $1', [req.params.id]);
-        if (charges.length) {
-          await insertCharges(client, req.params.id, charges);
-        }
+        if (charges.length) await insertCharges(client, req.params.id, charges);
       }
       return result.rows[0];
     });
@@ -240,7 +218,11 @@ exports.update = async (req, res, next) => {
 
 exports.delete = async (req, res, next) => {
   try {
-    const r = await query('UPDATE invoices SET deleted_at = NOW() WHERE id = $1 RETURNING invoice_no', [req.params.id]);
+    const r = await query(
+      'UPDATE invoices SET deleted_at = NOW() WHERE id = $1 AND tenant_id = $2 RETURNING invoice_no',
+      [req.params.id, req.tenantId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Invoice not found' });
     await audit.log(req, { action: 'DELETE', entityType: 'invoice', entityId: req.params.id, entityLabel: r.rows[0]?.invoice_no });
     res.json({ message: 'Invoice deleted' });
   } catch (err) { next(err); }
@@ -249,52 +231,37 @@ exports.delete = async (req, res, next) => {
 exports.generatePdf = async (req, res, next) => {
   try {
     const result = await query(
-      `${FULL_SELECT} WHERE i.id = $1 AND i.deleted_at IS NULL`,
-      [req.params.id]
+      `${FULL_SELECT} WHERE i.id = $1 AND i.tenant_id = $2 AND i.deleted_at IS NULL`,
+      [req.params.id, req.tenantId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Invoice not found' });
 
     const inv = result.rows[0];
-    // Merge carrier: prefer invoice's own shipping_line, fall back to quotation carrier
     inv.carrier = inv.shipping_line || inv.q_carrier || null;
 
-    // Build bank_account object from joined columns (prefixed ba_)
     if (inv.ba_account_name) {
       inv.bank_account = {
-        account_name:   inv.ba_account_name,
-        account_number: inv.ba_account_number,
-        currency:       inv.ba_currency,
-        iban:           inv.ba_iban,
-        bank_name:      inv.ba_bank_name,
-        bank_address:   inv.ba_bank_address,
-        swift_code:     inv.ba_swift_code,
+        account_name: inv.ba_account_name, account_number: inv.ba_account_number,
+        currency: inv.ba_currency, iban: inv.ba_iban, bank_name: inv.ba_bank_name,
+        bank_address: inv.ba_bank_address, swift_code: inv.ba_swift_code,
       };
     } else {
       inv.bank_account = null;
     }
 
-    // Fetch charges: prefer the invoice's own line items; if none exist and
-    // the invoice is linked to a quotation, fall back to the quotation charges
-    // (covers older invoices created before charges were stored per-invoice).
     let chargesRes = await query(
-      `SELECT description, category, amount, currency, qty, unit_rate
-       FROM invoice_charges
-       WHERE invoice_id = $1
-       ORDER BY created_at`,
+      `SELECT description, category, amount, currency, qty, unit_rate FROM invoice_charges WHERE invoice_id = $1 ORDER BY created_at`,
       [inv.id]
     );
     if (chargesRes.rows.length === 0 && inv.quotation_id) {
       chargesRes = await query(
-        `SELECT description, category, amount, currency, qty, unit_rate
-         FROM quotation_charges
-         WHERE quotation_id = $1
-         ORDER BY created_at`,
+        `SELECT description, category, amount, currency, qty, unit_rate FROM quotation_charges WHERE quotation_id = $1 ORDER BY created_at`,
         [inv.quotation_id]
       );
     }
     inv.charges = chargesRes.rows.length > 0 ? chargesRes.rows : null;
 
-    const settings = await loadSettings();
+    const settings = await loadSettings(req.tenantId);
     const pdfBuffer = await pdfService.generateInvoicePdf(inv, settings);
     const filename = `invoice-${inv.invoice_no}.pdf`.replace(/[^a-zA-Z0-9._-]/g, '_');
     res.set({

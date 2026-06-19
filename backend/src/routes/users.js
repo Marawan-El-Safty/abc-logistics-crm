@@ -8,6 +8,10 @@ router.use(authenticate);
 
 router.get('/', authorize('Admin', 'Sales Manager'), ctrl.getAll);
 router.get('/roles', authorize('Admin'), ctrl.getRoles);
+router.get('/seats', ctrl.getSeats);
+router.get('/me/notification-preferences', ctrl.getNotifPrefs);
+router.put('/me/notification-preferences', ctrl.updateNotifPrefs);
+router.post('/me/change-password', ctrl.changePassword);
 router.get('/:id', authorize('Admin', 'Sales Manager'), ctrl.getById);
 router.post('/',
   authorize('Admin'),
@@ -16,10 +20,15 @@ router.post('/',
   validate,
   ctrl.create
 );
-router.post('/me/change-password', ctrl.changePassword);
-router.get('/me/notification-preferences', ctrl.getNotifPrefs);
-router.put('/me/notification-preferences', ctrl.updateNotifPrefs);
+router.post('/invite',
+  authorize('Admin'),
+  body('email').isEmail(),
+  body('roleId').notEmpty(),
+  validate,
+  ctrl.inviteUser
+);
 router.put('/:id', authorize('Admin'), ctrl.update);
+router.delete('/:id/seat', authorize('Admin'), ctrl.freeUserSeat);
 router.delete('/:id', authorize('Admin'), ctrl.delete);
 
 module.exports = router;

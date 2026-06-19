@@ -1,16 +1,18 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { query } = require('../config/db');
+const { query, withTransaction } = require('../config/db');
 
-const generateTokens = (userId, roleId) => {
+const RESERVED_SLUGS = ['admin', 'api', 'www', 'app', 'mail', 'ftp', 'smtp', 'billing', 'support', 'help', 'status'];
+
+const generateTokens = (userId, roleId, tenantId, isSuperadmin = false) => {
   const accessToken = jwt.sign(
-    { userId, roleId },
+    { userId, roleId, tenantId, isSuperadmin },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
   );
   const refreshToken = jwt.sign(
-    { userId, roleId },
+    { userId, roleId, tenantId, isSuperadmin },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
   );
@@ -32,9 +34,26 @@ exports.login = async (req, res, next) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const { accessToken, refreshToken } = generateTokens(user.id, user.role_id);
+    // Check tenant status before issuing tokens
+    let tenant = null;
+    if (!user.is_superadmin && user.tenant_id) {
+      const tenantRes = await query('SELECT * FROM tenants WHERE id = $1', [user.tenant_id]);
+      tenant = tenantRes.rows[0];
+      if (tenant && ['suspended', 'canceled'].includes(tenant.status)) {
+        return res.status(403).json({
+          error: 'account_suspended',
+          message: 'Account suspended. Contact support to reactivate.',
+        });
+      }
+    }
 
-    // Store refresh token hash
+    const { accessToken, refreshToken } = generateTokens(
+      user.id,
+      user.role_id,
+      user.tenant_id || null,
+      user.is_superadmin || false
+    );
+
     const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await query(
@@ -60,7 +79,19 @@ exports.login = async (req, res, next) => {
         phone3: user.phone3 || null,
         jobTitle: user.job_title || null,
         salutation: user.salutation || null,
+        tenantId: user.tenant_id || null,
+        isSuperadmin: user.is_superadmin || false,
+        tenantRole: user.tenant_role || null,
       },
+      tenant: tenant ? {
+        id: tenant.id,
+        companyName: tenant.company_name,
+        plan: tenant.plan,
+        status: tenant.status,
+        trialEndsAt: tenant.trial_ends_at,
+        validUntil: tenant.valid_until,
+        seatLimit: tenant.seat_limit,
+      } : null,
     });
   } catch (err) {
     next(err);
@@ -86,10 +117,14 @@ exports.refresh = async (req, res, next) => {
     );
     if (!stored.rows.length) return res.status(401).json({ error: 'Refresh token not found or expired' });
 
-    // Rotate tokens
     await query('DELETE FROM refresh_tokens WHERE token_hash = $1', [tokenHash]);
 
-    const { accessToken, refreshToken: newRefresh } = generateTokens(decoded.userId, decoded.roleId);
+    const { accessToken, refreshToken: newRefresh } = generateTokens(
+      decoded.userId,
+      decoded.roleId,
+      decoded.tenantId || null,
+      decoded.isSuperadmin || false
+    );
     const newHash = crypto.createHash('sha256').update(newRefresh).digest('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await query(
@@ -145,6 +180,9 @@ exports.me = async (req, res) => {
     jobTitle: req.user.job_title || null,
     salutation: req.user.salutation || null,
     lastLoginAt: req.user.last_login_at,
+    tenantId: req.user.tenant_id || null,
+    isSuperadmin: req.user.is_superadmin || false,
+    tenantRole: req.user.tenant_role || null,
   });
 };
 
@@ -171,9 +209,101 @@ exports.changePassword = async (req, res, next) => {
 
     const hash = await bcrypt.hash(newPassword, 12);
     await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, req.user.id]);
-    // Invalidate all refresh tokens
     await query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
     res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.registerCompany = async (req, res, next) => {
+  try {
+    const { company_name, slug, email, password, full_name } = req.body;
+
+    if (!company_name || !slug || !email || !password || !full_name) {
+      return res.status(400).json({ error: 'All fields required: company_name, slug, email, password, full_name' });
+    }
+    if (!/^[a-z0-9-]{3,63}$/.test(slug)) {
+      return res.status(400).json({ error: 'Slug must be 3-63 chars: lowercase letters, numbers, hyphens only' });
+    }
+    if (RESERVED_SLUGS.includes(slug)) {
+      return res.status(400).json({ error: 'That slug is reserved. Choose another.' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    // Check slug uniqueness
+    const slugCheck = await query('SELECT id FROM tenants WHERE slug = $1', [slug]);
+    if (slugCheck.rows.length) {
+      return res.status(409).json({ error: 'Slug already taken' });
+    }
+    const emailCheck = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    if (emailCheck.rows.length) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    // Get default role (Sales Manager or first available)
+    const roleRes = await query(`SELECT id FROM roles WHERE name = 'Admin' LIMIT 1`);
+    if (!roleRes.rows.length) return res.status(500).json({ error: 'Default role not configured' });
+    const roleId = roleRes.rows[0].id;
+
+    const hash = await bcrypt.hash(password, 12);
+    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    const result = await withTransaction(async (client) => {
+      const tenantRes = await client.query(
+        `INSERT INTO tenants (company_name, slug, plan, status, seat_limit, trial_ends_at)
+         VALUES ($1, $2, 'starter', 'trial', 5, $3)
+         RETURNING *`,
+        [company_name, slug, trialEndsAt]
+      );
+      const tenant = tenantRes.rows[0];
+
+      const userRes = await client.query(
+        `INSERT INTO users (full_name, email, password_hash, role_id, tenant_id, tenant_role, user_status, is_active)
+         VALUES ($1, $2, $3, $4, $5, 'owner', 'active', TRUE)
+         RETURNING id, full_name, email, role_id, tenant_id, tenant_role`,
+        [full_name, email.toLowerCase().trim(), hash, roleId, tenant.id]
+      );
+      const user = userRes.rows[0];
+
+      await client.query(
+        `INSERT INTO app_settings (tenant_id, data) VALUES ($1, '{}') ON CONFLICT (tenant_id) DO NOTHING`,
+        [tenant.id]
+      );
+
+      return { tenant, user };
+    });
+
+    const { tenant, user } = result;
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role_id, tenant.id, false);
+
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await query('INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)', [user.id, tokenHash, expiresAt]);
+
+    res.status(201).json({
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        fullName: user.full_name,
+        email: user.email,
+        tenantId: tenant.id,
+        tenantRole: 'owner',
+        isSuperadmin: false,
+      },
+      tenant: {
+        id: tenant.id,
+        companyName: tenant.company_name,
+        slug: tenant.slug,
+        plan: tenant.plan,
+        status: tenant.status,
+        trialEndsAt: tenant.trial_ends_at,
+        seatLimit: tenant.seat_limit,
+      },
+    });
   } catch (err) {
     next(err);
   }

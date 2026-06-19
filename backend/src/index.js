@@ -9,7 +9,7 @@ const cron = require('node-cron');
 const fs = require('fs');
 
 const errorHandler = require('./middleware/errorHandler');
-const { checkDueFollowUps, checkOverdueInvoices } = require('./services/notificationService');
+const { checkDueFollowUps, checkOverdueInvoices, warnExpiringTrials } = require('./services/notificationService');
 const { pool } = require('./config/db');
 
 async function autoMigrate() {
@@ -379,6 +379,116 @@ async function autoMigrate() {
     )
   `);
 
+  // ── Multi-tenant SaaS migration ────────────────────────────────────────────
+
+  // Plans table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plans (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name        VARCHAR(50) UNIQUE NOT NULL,
+      price_per_seat DECIMAL(10,2) NOT NULL DEFAULT 0,
+      features    JSONB NOT NULL DEFAULT '{}',
+      limits      JSONB NOT NULL DEFAULT '{}',
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // Seed plans (idempotent)
+  await pool.query(`
+    INSERT INTO plans (name, price_per_seat, features, limits) VALUES
+    ('starter', 15, '{"sales_invoices":false,"bl_documents":false,"reports_export":false,"audit_log":false}',
+     '{"shipments_per_month":50,"clients":200,"seats":3}'),
+    ('professional', 25, '{"sales_invoices":true,"bl_documents":true,"reports_export":true,"audit_log":false}',
+     '{"shipments_per_month":500,"clients":2000,"seats":15}'),
+    ('enterprise', 40, '{"sales_invoices":true,"bl_documents":true,"reports_export":true,"audit_log":true}',
+     '{"shipments_per_month":99999,"clients":99999,"seats":99999}')
+    ON CONFLICT (name) DO NOTHING
+  `);
+
+  // Tenants table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tenants (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      company_name   VARCHAR(255) NOT NULL,
+      slug           VARCHAR(63) UNIQUE NOT NULL,
+      plan_id        UUID REFERENCES plans(id),
+      seat_limit     INTEGER NOT NULL DEFAULT 3,
+      status         VARCHAR(20) NOT NULL DEFAULT 'trial' CHECK (status IN ('trial','active','suspended','canceled')),
+      trial_ends_at  TIMESTAMPTZ,
+      valid_until    TIMESTAMPTZ,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // Tenant zero (backfill tenant for existing single-tenant data)
+  await pool.query(`
+    INSERT INTO tenants (id, company_name, slug, status, seat_limit)
+    VALUES ('00000000-0000-0000-0000-000000000001', 'Default Tenant', 'default', 'active', 999)
+    ON CONFLICT (id) DO NOTHING
+  `);
+
+  // Assign starter plan to tenant zero if not set
+  await pool.query(`
+    UPDATE tenants t SET plan_id = (SELECT id FROM plans WHERE name='enterprise')
+    WHERE t.id = '00000000-0000-0000-0000-000000000001' AND t.plan_id IS NULL
+  `);
+
+  // Add tenant_id to users
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id)`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token VARCHAR(255)`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (user_status IN ('active','pending','suspended'))`);
+
+  // Backfill users with tenant zero
+  await pool.query(`UPDATE users SET tenant_id='00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL`);
+
+  // Add tenant_id to all business tables
+  const businessTables = [
+    'leads','clients','activities','tasks','open_requests','request_replies',
+    'quotations','quotation_charges','quotation_versions',
+    'invoices','invoice_charges',
+    'shipments','shipment_attachments',
+    'notifications','audit_log',
+    'shipping_rates','bank_accounts',
+    'sales_invoices','bl_documents',
+    'email_logs','contracts',
+  ];
+  for (const tbl of businessTables) {
+    await pool.query(`ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id)`);
+    await pool.query(`UPDATE ${tbl} SET tenant_id='00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL`);
+  }
+
+  // Fix app_settings for multi-tenant (drop single-row constraint, add tenant_id)
+  await pool.query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id)`);
+  await pool.query(`ALTER TABLE app_settings DROP CONSTRAINT IF EXISTS app_settings_single_row`);
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename='app_settings' AND indexname='app_settings_tenant_id_key') THEN
+        CREATE UNIQUE INDEX app_settings_tenant_id_key ON app_settings (tenant_id);
+      END IF;
+    END $$
+  `);
+  // Migrate legacy row 1 to tenant zero
+  await pool.query(`
+    UPDATE app_settings SET tenant_id='00000000-0000-0000-0000-000000000001'
+    WHERE id=1 AND tenant_id IS NULL
+  `);
+
+  // Composite tenant indexes for query performance
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_leads_tenant       ON leads (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_clients_tenant     ON clients (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_shipments_tenant   ON shipments (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoices_tenant    ON invoices (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_quotations_tenant  ON quotations (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_activities_tenant  ON activities (tenant_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_tenant       ON tasks (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_tenant       ON users (tenant_id) WHERE deleted_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_tenant       ON audit_log (tenant_id, created_at DESC)`);
+
+  console.log('FreightOS multi-tenant migration complete.');
+
   // Run demo seed after all migrations (only on fresh DB)
   if (isNewDb) {
     console.log('Seeding demo data...');
@@ -416,8 +526,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
 
-// Rate limiter
+// Rate limiters
+// HIGH-4: Tight limits on registration and invite-accept to prevent brute force / abuse
 app.use('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many login attempts' }));
+app.use('/api/auth/register-company', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: 'Too many registration attempts' }));
+app.use('/api/auth/accept-invite', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many invite attempts' }));
 app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 300 }));
 
 // Static files
@@ -446,6 +559,8 @@ app.use('/api/shipments/:shipmentId/attachments', require('./routes/shipmentAtta
 app.use('/api/bl', require('./routes/bl'));
 app.use('/api/sales-invoices', require('./routes/salesInvoices'));
 app.use('/api/emails', require('./routes/emails'));
+app.use('/api/tenant', require('./routes/tenant'));
+app.use('/api/admin', require('./routes/admin'));
 
 // Serve built frontend for all non-API routes
 const frontendBuild = path.join(__dirname, '../frontend/build');
@@ -464,13 +579,25 @@ app.use(errorHandler);
 cron.schedule('0 8 * * *', () => {
   checkDueFollowUps();
   checkOverdueInvoices();
+  warnExpiringTrials();
 });
+
+// HIGH-3: Fail fast if JWT secrets are missing or too short.
+// Must run before autoMigrate so the process never starts in an insecure state.
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  console.error('FATAL: JWT_SECRET must be set and at least 32 characters');
+  process.exit(1);
+}
+if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 32) {
+  console.error('FATAL: JWT_REFRESH_SECRET must be set and at least 32 characters');
+  process.exit(1);
+}
 
 const PORT = process.env.PORT || 4000;
 autoMigrate()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`ABC Logistics CRM running on http://0.0.0.0:${PORT}`);
+      console.log(`FreightOS running on http://0.0.0.0:${PORT}`);
       console.log(`Local network access: http://YOUR_IP:${PORT}`);
     });
   })
