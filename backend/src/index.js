@@ -635,9 +635,37 @@ async function autoMigrate() {
     await pool.query(`UPDATE ${tbl} SET tenant_id='00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL`);
   }
 
-  // Fix app_settings for multi-tenant (drop single-row constraint, add tenant_id)
+  // Fix app_settings for multi-tenant:
+  // The original table has id INT PRIMARY KEY DEFAULT 1 (single-row enforcement).
+  // We need to replace it with a UUID pk so each tenant can have a row.
   await pool.query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id)`);
   await pool.query(`ALTER TABLE app_settings DROP CONSTRAINT IF EXISTS app_settings_single_row`);
+  // Add a UUID surrogate key column if the old INT pk is still the only pk
+  await pool.query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS uid UUID DEFAULT gen_random_uuid()`);
+  // Drop the INT primary key constraint and promote tenant_id to be the unique identifier
+  await pool.query(`
+    DO $$ BEGIN
+      -- Drop old integer PK if it still points to id=INT column
+      IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name='app_settings' AND constraint_type='PRIMARY KEY'
+      ) THEN
+        ALTER TABLE app_settings DROP CONSTRAINT IF EXISTS app_settings_pkey;
+      END IF;
+    END $$
+  `);
+  // Make uid the new PK (idempotent via index existence check)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name='app_settings' AND constraint_type='PRIMARY KEY'
+      ) THEN
+        ALTER TABLE app_settings ADD PRIMARY KEY (uid);
+      END IF;
+    END $$
+  `);
+  // Unique index on tenant_id
   await pool.query(`
     DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename='app_settings' AND indexname='app_settings_tenant_id_key') THEN
@@ -645,10 +673,10 @@ async function autoMigrate() {
       END IF;
     END $$
   `);
-  // Migrate legacy row 1 to tenant zero
+  // Migrate legacy row to tenant zero
   await pool.query(`
     UPDATE app_settings SET tenant_id='00000000-0000-0000-0000-000000000001'
-    WHERE id=1 AND tenant_id IS NULL
+    WHERE tenant_id IS NULL
   `);
 
   // Composite tenant indexes for query performance

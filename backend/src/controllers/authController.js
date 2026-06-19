@@ -269,7 +269,7 @@ exports.registerCompany = async (req, res, next) => {
       const user = userRes.rows[0];
 
       await client.query(
-        `INSERT INTO app_settings (tenant_id, data) VALUES ($1, '{}') ON CONFLICT (tenant_id) DO NOTHING`,
+        `INSERT INTO app_settings (uid, tenant_id, data) VALUES (gen_random_uuid(), $1, '{}') ON CONFLICT (tenant_id) DO NOTHING`,
         [tenant.id]
       );
 
