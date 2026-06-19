@@ -174,6 +174,15 @@ async function autoMigrate() {
     }'
     WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = 'Operation')
   `);
+  // Viewer role — read-only access
+  await pool.query(`
+    INSERT INTO roles (name, description, permissions)
+    SELECT 'Viewer', 'Read-only access to dashboard and reports', '{
+      "dashboard": ["read"],
+      "reports": ["read"]
+    }'
+    WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = 'Viewer')
+  `);
   // Global app settings — single JSONB row (company info, PDF/bank defaults,
   // default currency, session timeouts). Replaces hardcoded values.
   await pool.query(`

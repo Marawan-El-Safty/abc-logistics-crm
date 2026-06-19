@@ -24,6 +24,7 @@ const PAGE_TITLES = {
   '/profit': 'Profit & Margin',
   '/operations': 'Operations',
   '/shipments': 'Shipments',
+  '/team': 'Team Management',
   '/settings': 'Settings',
   '/audit': 'Trash',
 };

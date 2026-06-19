@@ -77,10 +77,19 @@ export const AuthProvider = ({ children }) => {
   const isRep = user?.role === 'Sales Rep';
   const isFinance = user?.role === 'Finance';
   const isOperation = user?.role === 'Operation';
+  const isViewer = user?.role === 'Viewer';
+  const isOwner = user?.tenantRole === 'owner';
+  const tenantRole = user?.tenantRole || 'member';
   const canManage = isAdmin || isManager;
+  const canAdminTeam = isAdmin || isOwner;
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, isAdmin, isManager, isRep, isFinance, isOperation, canManage, settings, refreshSettings }}>
+    <AuthContext.Provider value={{
+      user, login, logout, loading,
+      isAdmin, isManager, isRep, isFinance, isOperation, isViewer, isOwner,
+      tenantRole, canManage, canAdminTeam,
+      settings, refreshSettings,
+    }}>
       {children}
       {showWarning && (
         <InactivityWarning
