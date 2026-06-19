@@ -57,8 +57,6 @@ function SuspendedBanner() {
   );
 }
 
-const PLAN_COLORS = { starter: 'bg-gray-800', professional: 'bg-blue-700', enterprise: 'bg-purple-700' };
-
 function TrialBanner() {
   const [info, setInfo] = useState(null);
   useEffect(() => {
@@ -69,7 +67,7 @@ function TrialBanner() {
   const daysLeft = ends ? Math.max(0, Math.ceil((ends - Date.now()) / 86400000)) : null;
   const urgent = daysLeft !== null && daysLeft <= 3;
   return (
-    <div className={`${urgent ? 'bg-orange-600' : 'bg-blue-600'} text-white text-xs px-4 py-1.5 flex items-center justify-between`}>
+    <div className={`${urgent ? 'bg-orange-600' : 'bg-amber-600'} text-white text-xs px-4 py-1.5 flex items-center justify-between`}>
       <span>
         🎉 Free trial — <strong>{daysLeft !== null ? `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left` : 'active'}</strong>
         {' '}· <strong>{info.tenant?.plan?.charAt(0).toUpperCase() + info.tenant?.plan?.slice(1)}</strong> plan

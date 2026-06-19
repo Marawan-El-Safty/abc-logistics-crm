@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 import { useAuth } from '../store/AuthContext';
 import { useRoles } from '../hooks/useRoles';
@@ -10,7 +10,7 @@ import {
 
 const ROLE_BADGE = {
   'Admin': 'bg-amber-100 text-amber-800 border-amber-200',
-  'Sales Manager': 'bg-blue-100 text-blue-800 border-blue-200',
+  'Sales Manager': 'bg-indigo-100 text-indigo-800 border-indigo-200',
   'Sales Rep': 'bg-green-100 text-green-800 border-green-200',
   'Finance': 'bg-purple-100 text-purple-800 border-purple-200',
   'Operation': 'bg-cyan-100 text-cyan-800 border-cyan-200',
@@ -144,24 +144,28 @@ function UserRow({ u, currentUser, roles, onUpdate }) {
   const [saving, setSaving] = useState(false);
   const isMe = u.id === currentUser?.id;
   const isOwner = u.tenant_role === 'owner';
+  const debounceTimer = useRef(null);
 
-  const changeRole = async (newRoleId) => {
+  const changeRole = (newRoleId) => {
     setRoleId(newRoleId);
-    setSaving(true);
-    try {
-      await api.put(`/users/${u.id}`, { roleId: parseInt(newRoleId) });
-      toast.success('Role updated');
-      onUpdate();
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to update role');
-      setRoleId(u.role_id);
-    } finally { setSaving(false); }
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.put(`/users/${u.id}/role`, { roleId: parseInt(newRoleId) });
+        toast.success('Role updated');
+        onUpdate();
+      } catch (err) {
+        toast.error(err.response?.data?.error || 'Failed to update role');
+        setRoleId(u.role_id);
+      } finally { setSaving(false); }
+    }, 800);
   };
 
   const toggleActive = async () => {
     setSaving(true);
     try {
-      await api.put(`/users/${u.id}`, { isActive: !u.is_active });
+      await api.put(`/users/${u.id}/status`, { isActive: !u.is_active });
       toast.success(u.is_active ? 'User deactivated' : 'User reactivated');
       onUpdate();
     } catch (err) {
@@ -261,6 +265,7 @@ export default function TeamPage() {
   const [users, setUsers] = useState([]);
   const [seatInfo, setSeatInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [search, setSearch] = useState('');
   const [showInvite, setShowInvite] = useState(false);
 
@@ -272,8 +277,10 @@ export default function TeamPage() {
       ]);
       setUsers(usersRes.data.data || []);
       setSeatInfo(seatsRes.data);
+      setError(false);
     } catch {
       toast.error('Failed to load team');
+      setError(true);
     } finally { setLoading(false); }
   }, []);
 
@@ -338,6 +345,7 @@ export default function TeamPage() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="border-b border-slate-100 bg-slate-50">
             <tr>
@@ -349,7 +357,9 @@ export default function TeamPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {error ? (
+              <tr><td colSpan={5} className="text-center py-12 text-red-500">Failed to load team members. Please refresh.</td></tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={5} className="py-12 text-center text-slate-400 text-sm">
                   {search ? 'No users match your search.' : 'No team members yet.'}
@@ -360,6 +370,7 @@ export default function TeamPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">

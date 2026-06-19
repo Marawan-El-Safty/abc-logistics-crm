@@ -27,6 +27,8 @@ router.post('/invite',
   validate,
   ctrl.inviteUser
 );
+router.put('/:id/role',   authorize('Admin'), ctrl.updateRole);
+router.put('/:id/status', authorize('Admin'), ctrl.toggleStatus);
 router.put('/:id', authorize('Admin'), ctrl.update);
 router.delete('/:id/seat', authorize('Admin'), ctrl.freeUserSeat);
 router.delete('/:id', authorize('Admin'), ctrl.delete);

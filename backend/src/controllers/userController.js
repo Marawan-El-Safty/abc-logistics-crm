@@ -49,6 +49,17 @@ exports.create = async (req, res, next) => {
 exports.update = async (req, res, next) => {
   try {
     const { fullName, email, roleId, phone, isActive } = req.body;
+
+    if (roleId !== undefined) {
+      const ownerCheck = await query(
+        'SELECT tenant_role FROM users WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL',
+        [req.params.id, req.tenantId]
+      );
+      if (ownerCheck.rows[0]?.tenant_role === 'owner') {
+        return res.status(400).json({ error: 'Cannot change role of workspace owner' });
+      }
+    }
+
     const result = await query(
       `UPDATE users SET full_name = COALESCE($1, full_name),
                         email = COALESCE($2, email),
@@ -111,8 +122,74 @@ exports.updateNotifPrefs = async (req, res, next) => {
 
 exports.getRoles = async (req, res, next) => {
   try {
-    const result = await query('SELECT id, name, description FROM roles ORDER BY id');
+    const result = await query("SELECT id, name, description FROM roles WHERE name != 'Owner' ORDER BY id");
     res.json({ data: result.rows });
+  } catch (err) { next(err); }
+};
+
+exports.updateRole = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { roleId } = req.body;
+    if (!roleId) return res.status(400).json({ error: 'roleId required' });
+    if (req.user.id === id) return res.status(400).json({ error: 'Cannot change your own role' });
+
+    const roleCheck = await query('SELECT id, name FROM roles WHERE id = $1', [roleId]);
+    if (!roleCheck.rows.length) return res.status(400).json({ error: 'Invalid role' });
+    if (roleCheck.rows[0].name === 'Owner') return res.status(400).json({ error: 'Cannot assign Owner role' });
+
+    const targetRes = await query(
+      'SELECT id, tenant_role, role_id FROM users WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL',
+      [id, req.tenantId]
+    );
+    if (!targetRes.rows.length) return res.status(404).json({ error: 'User not found' });
+    const target = targetRes.rows[0];
+    if (target.tenant_role === 'owner') return res.status(400).json({ error: 'Cannot change role of workspace owner' });
+
+    const oldRoleId = target.role_id;
+    await query('UPDATE users SET role_id = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [roleId, id, req.tenantId]);
+
+    await query(
+      `INSERT INTO audit_log (tenant_id, actor_id, action, entity_type, entity_id, details)
+       VALUES ($1, $2, 'role_change', 'user', $3, $4)`,
+      [req.tenantId, req.user.id, id, JSON.stringify({ oldRoleId, newRoleId: roleId })]
+    );
+
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+};
+
+exports.toggleStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+    if (typeof isActive !== 'boolean') return res.status(400).json({ error: 'isActive (boolean) required' });
+    if (req.user.id === id) return res.status(400).json({ error: 'Cannot change your own status' });
+
+    const targetRes = await query(
+      `SELECT u.id, u.tenant_role, u.is_active, r.name AS role_name
+       FROM users u JOIN roles r ON u.role_id = r.id
+       WHERE u.id = $1 AND u.tenant_id = $2 AND u.deleted_at IS NULL`,
+      [id, req.tenantId]
+    );
+    if (!targetRes.rows.length) return res.status(404).json({ error: 'User not found' });
+    const target = targetRes.rows[0];
+    if (target.tenant_role === 'owner') return res.status(400).json({ error: 'Cannot deactivate workspace owner' });
+
+    if (!isActive && target.role_name === 'Admin') {
+      const adminCountRes = await query(
+        `SELECT COUNT(*) FROM users u
+         JOIN roles r ON u.role_id = r.id
+         WHERE u.tenant_id = $1 AND r.name = 'Admin' AND u.is_active = TRUE AND u.deleted_at IS NULL AND u.id != $2`,
+        [req.tenantId, id]
+      );
+      if (parseInt(adminCountRes.rows[0].count) === 0) {
+        return res.status(400).json({ error: 'Cannot deactivate the last active Admin' });
+      }
+    }
+
+    await query('UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [isActive, id, req.tenantId]);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 };
 
