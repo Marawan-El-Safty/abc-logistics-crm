@@ -16,22 +16,28 @@ export default function RegisterPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await api.post('/auth/register-company', form);
+      const res = await api.post('/auth/register-company', {
+        company_name: form.companyName,
+        slug: form.slug,
+        full_name: form.fullName,
+        email: form.email,
+        password: form.password,
+      });
       const { accessToken, refreshToken } = res.data;
       localStorage.setItem('access_token', accessToken);
       localStorage.setItem('refresh_token', refreshToken);
       navigate('/onboarding');
     } catch (err) {
       // UX-4: Map backend error codes to user-friendly messages
-      const errCode = err.response?.data?.error;
-      if (errCode === 'slug_taken') {
+      const errMsg = err.response?.data?.error || '';
+      if (errMsg.toLowerCase().includes('slug') && errMsg.toLowerCase().includes('taken')) {
         setError('That workspace name is already taken. Try another.');
-      } else if (errCode === 'slug_reserved') {
+      } else if (errMsg.toLowerCase().includes('reserved')) {
         setError('That workspace name is reserved. Please choose another.');
-      } else if (errCode === 'email_taken') {
+      } else if (errMsg.toLowerCase().includes('email') && errMsg.toLowerCase().includes('registered')) {
         setError('An account with this email already exists. Try logging in.');
       } else {
-        setError(err.response?.data?.message || 'Registration failed. Please try again.');
+        setError(errMsg || err.response?.data?.message || 'Registration failed. Please try again.');
       }
     } finally {
       setLoading(false);

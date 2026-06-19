@@ -436,10 +436,26 @@ async function autoMigrate() {
 
   // Add tenant_id to users
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id)`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_role VARCHAR(20) NOT NULL DEFAULT 'member'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token VARCHAR(255)`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (user_status IN ('active','pending','suspended'))`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_status VARCHAR(20) NOT NULL DEFAULT 'active'`);
+
+  // Add plan column to tenants (idempotent — first deploy may have used plan_id instead)
+  await pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan VARCHAR(50) NOT NULL DEFAULT 'starter'`);
+  // Backfill plan from plan_id join if plan_id exists and plan is still default
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tenants' AND column_name='plan_id') THEN
+        UPDATE tenants t SET plan = p.name
+        FROM plans p WHERE p.id = t.plan_id AND t.plan = 'starter' AND t.plan_id IS NOT NULL;
+      END IF;
+    END $$
+  `);
+  // Ensure tenant zero has enterprise plan
+  await pool.query(`UPDATE tenants SET plan='enterprise' WHERE id='00000000-0000-0000-0000-000000000001'`);
 
   // Backfill users with tenant zero
   await pool.query(`UPDATE users SET tenant_id='00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL`);
