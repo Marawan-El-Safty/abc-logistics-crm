@@ -218,11 +218,17 @@ exports.changePassword = async (req, res, next) => {
 
 exports.registerCompany = async (req, res, next) => {
   try {
-    const { company_name, slug, email, password, full_name } = req.body;
+    const { company_name, slug, email, password, full_name, plan, seats } = req.body;
 
     if (!company_name || !slug || !email || !password || !full_name) {
       return res.status(400).json({ error: 'All fields required: company_name, slug, email, password, full_name' });
     }
+
+    const VALID_PLANS = ['starter', 'professional', 'enterprise'];
+    const chosenPlan = VALID_PLANS.includes(plan) ? plan : 'starter';
+    const DEFAULT_SEATS = { starter: 5, professional: 15, enterprise: 50 };
+    const parsedSeats = parseInt(seats, 10);
+    const chosenSeats = parsedSeats >= 1 && parsedSeats <= 500 ? parsedSeats : DEFAULT_SEATS[chosenPlan];
     if (!/^[a-z0-9-]{3,63}$/.test(slug)) {
       return res.status(400).json({ error: 'Slug must be 3-63 chars: lowercase letters, numbers, hyphens only' });
     }
@@ -254,9 +260,9 @@ exports.registerCompany = async (req, res, next) => {
     const result = await withTransaction(async (client) => {
       const tenantRes = await client.query(
         `INSERT INTO tenants (company_name, slug, plan, status, seat_limit, trial_ends_at)
-         VALUES ($1, $2, 'starter', 'trial', 5, $3)
+         VALUES ($1, $2, $3, 'trial', $4, $5)
          RETURNING *`,
-        [company_name, slug, trialEndsAt]
+        [company_name, slug, chosenPlan, chosenSeats, trialEndsAt]
       );
       const tenant = tenantRes.rows[0];
 

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, Link } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import OfflineBanner from '../common/OfflineBanner';
 import GlobalSearch from '../common/GlobalSearch';
 import ErrorBoundary from '../common/ErrorBoundary';
+import api from '../../services/api';
 
 const PAGE_TITLES = {
   '/': 'Dashboard',
@@ -55,14 +56,38 @@ function SuspendedBanner() {
   );
 }
 
+const PLAN_COLORS = { starter: 'bg-gray-800', professional: 'bg-blue-700', enterprise: 'bg-purple-700' };
+
+function TrialBanner() {
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    api.get('/tenant/plan').then(r => setInfo(r.data)).catch(() => {});
+  }, []);
+  if (!info || info.tenant?.status !== 'trial') return null;
+  const ends = info.tenant?.trialEndsAt ? new Date(info.tenant.trialEndsAt) : null;
+  const daysLeft = ends ? Math.max(0, Math.ceil((ends - Date.now()) / 86400000)) : null;
+  const urgent = daysLeft !== null && daysLeft <= 3;
+  return (
+    <div className={`${urgent ? 'bg-orange-600' : 'bg-blue-600'} text-white text-xs px-4 py-1.5 flex items-center justify-between`}>
+      <span>
+        🎉 Free trial — <strong>{daysLeft !== null ? `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left` : 'active'}</strong>
+        {' '}· <strong>{info.tenant?.plan?.charAt(0).toUpperCase() + info.tenant?.plan?.slice(1)}</strong> plan
+        · {info.usage?.seats || 1} / {info.tenant?.seatLimit} seats used
+      </span>
+      <Link to="/pricing" className="ml-4 underline font-medium hover:no-underline">Upgrade plan →</Link>
+    </div>
+  );
+}
+
 export default function Layout() {
   const location = useLocation();
-  const title = PAGE_TITLES[location.pathname] || 'ABC Logistics CRM';
+  const title = PAGE_TITLES[location.pathname] || 'FreightOS';
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-navy-950 overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
+        <TrialBanner />
         <SuspendedBanner />
         <Header title={title} />
         <main className="flex-1 overflow-y-auto p-6">

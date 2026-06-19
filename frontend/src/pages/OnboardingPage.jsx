@@ -78,7 +78,7 @@ export default function OnboardingPage() {
             <div className="text-5xl mb-4">🎉</div>
             <h3 className="text-xl font-semibold text-gray-800 mb-2">You're all set!</h3>
             <p className="text-gray-500 mb-6">Your FreightOS workspace is ready.</p>
-            <button onClick={() => navigate('/dashboard')} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700">
+            <button onClick={() => navigate('/')} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700">
               Go to Dashboard
             </button>
           </div>
