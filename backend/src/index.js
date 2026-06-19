@@ -778,15 +778,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 // Error handler
 app.use(errorHandler);
 
-// Scheduled jobs
-cron.schedule('0 8 * * *', () => {
-  checkDueFollowUps();
-  checkOverdueInvoices();
-  warnExpiringTrials();
-});
-
 // HIGH-3: Fail fast if JWT secrets are missing or too short.
-// Must run before autoMigrate so the process never starts in an insecure state.
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   console.error('FATAL: JWT_SECRET must be set and at least 32 characters');
   process.exit(1);
@@ -796,17 +788,35 @@ if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 3
   process.exit(1);
 }
 
-const PORT = process.env.PORT || 4000;
-autoMigrate()
-  .then(() => {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`FreightOS running on http://0.0.0.0:${PORT}`);
-      console.log(`Local network access: http://YOUR_IP:${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('Migration failed, aborting startup:', err.message);
-    process.exit(1);
+// Internal cron endpoint (called by Vercel Cron or manually)
+app.post('/api/internal/cron-daily', (req, res) => {
+  const secret = req.headers['x-cron-secret'];
+  if (secret !== process.env.CRON_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  checkDueFollowUps();
+  checkOverdueInvoices();
+  warnExpiringTrials();
+  res.json({ ok: true });
+});
+
+if (!process.env.VERCEL) {
+  // Long-running server: scheduled jobs + autoMigrate + listen
+  cron.schedule('0 8 * * *', () => {
+    checkDueFollowUps();
+    checkOverdueInvoices();
+    warnExpiringTrials();
   });
+
+  const PORT = process.env.PORT || 4000;
+  autoMigrate()
+    .then(() => {
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`FreightOS running on http://0.0.0.0:${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error('Migration failed, aborting startup:', err.message);
+      process.exit(1);
+    });
+}
 
 module.exports = app;
