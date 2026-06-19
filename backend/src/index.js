@@ -705,9 +705,13 @@ const app = express();
 
 app.set('trust proxy', 1);
 
-// Ensure upload dir exists
-const uploadDir = process.env.UPLOAD_DIR || 'uploads';
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// On Vercel, only /tmp is writable; everywhere else use UPLOAD_DIR or 'uploads'
+const uploadDir = process.env.VERCEL
+  ? '/tmp/uploads'
+  : (process.env.UPLOAD_DIR || 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 // Security & parsing
 app.use(helmet({
@@ -765,11 +769,13 @@ app.use('/api/emails', require('./routes/emails'));
 app.use('/api/tenant', require('./routes/tenant'));
 app.use('/api/admin', require('./routes/admin'));
 
-// Serve built frontend for all non-API routes
-const frontendBuild = path.join(__dirname, '../frontend/build');
-if (fs.existsSync(frontendBuild)) {
-  app.use(express.static(frontendBuild));
-  app.get('*', (req, res) => res.sendFile(path.join(frontendBuild, 'index.html')));
+// Serve built frontend for all non-API routes (local/Railway only)
+if (!process.env.VERCEL) {
+  const frontendBuild = path.join(__dirname, '../frontend/build');
+  if (fs.existsSync(frontendBuild)) {
+    app.use(express.static(frontendBuild));
+    app.get('*', (req, res) => res.sendFile(path.join(frontendBuild, 'index.html')));
+  }
 }
 
 // Health check
