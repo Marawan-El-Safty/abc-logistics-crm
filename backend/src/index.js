@@ -444,6 +444,165 @@ async function autoMigrate() {
   // Backfill users with tenant zero
   await pool.query(`UPDATE users SET tenant_id='00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL`);
 
+  // Ensure core tables exist that were only in schema.sql (not in incremental migrations).
+  // Safe on existing DBs — IF NOT EXISTS is a no-op.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash VARCHAR(255) NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      login_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      logout_at        TIMESTAMPTZ,
+      last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      duration_minutes NUMERIC(8,2),
+      logout_reason    VARCHAR(20) DEFAULT 'manual'
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS client_contacts (
+      id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      client_id    UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      full_name    VARCHAR(150) NOT NULL,
+      title        VARCHAR(100),
+      phone        VARCHAR(50),
+      email        VARCHAR(255),
+      whatsapp     VARCHAR(50),
+      is_primary   BOOLEAN NOT NULL DEFAULT FALSE,
+      notes        TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS client_branches (
+      id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      client_id  UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      name       VARCHAR(150) NOT NULL,
+      country    VARCHAR(100),
+      address    TEXT,
+      phone      VARCHAR(50),
+      notes      TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS quotation_charges (
+      id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      quotation_id UUID NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+      description  VARCHAR(255) NOT NULL,
+      amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
+      currency     VARCHAR(10) NOT NULL DEFAULT 'USD',
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS activities (
+      id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      activity_type   VARCHAR(50) NOT NULL,
+      client_id       UUID REFERENCES clients(id),
+      lead_id         UUID REFERENCES leads(id),
+      performed_by    UUID NOT NULL REFERENCES users(id),
+      activity_date   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      notes           TEXT,
+      outcome         TEXT,
+      next_follow_up  TIMESTAMPTZ,
+      follow_up_notes TEXT,
+      reminder_sent   BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      title        VARCHAR(255) NOT NULL,
+      description  TEXT,
+      due_date     TIMESTAMPTZ,
+      priority     VARCHAR(20) NOT NULL DEFAULT 'Medium',
+      status       VARCHAR(20) NOT NULL DEFAULT 'To Do',
+      assigned_to  UUID NOT NULL REFERENCES users(id),
+      assigned_by  UUID REFERENCES users(id),
+      client_id    UUID REFERENCES clients(id),
+      lead_id      UUID REFERENCES leads(id),
+      created_by   UUID NOT NULL REFERENCES users(id),
+      completed_at TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      deleted_at   TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS open_requests (
+      id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      title        VARCHAR(255) NOT NULL,
+      description  TEXT,
+      priority     VARCHAR(20) NOT NULL DEFAULT 'Medium',
+      status       VARCHAR(20) NOT NULL DEFAULT 'Open',
+      client_id    UUID REFERENCES clients(id),
+      submitted_by UUID NOT NULL REFERENCES users(id),
+      assigned_to  UUID REFERENCES users(id),
+      resolution   TEXT,
+      closed_at    TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      deleted_at   TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contracts (
+      id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      client_id   UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      title       VARCHAR(255) NOT NULL,
+      file_url    TEXT,
+      file_name   VARCHAR(255),
+      file_size   INTEGER,
+      start_date  DATE,
+      end_date    DATE,
+      notes       TEXT,
+      uploaded_by UUID NOT NULL REFERENCES users(id),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      deleted_at  TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS communication_log (
+      id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      client_id  UUID REFERENCES clients(id),
+      lead_id    UUID REFERENCES leads(id),
+      user_id    UUID NOT NULL REFERENCES users(id),
+      direction  VARCHAR(20) NOT NULL DEFAULT 'Outbound',
+      channel    VARCHAR(20) NOT NULL DEFAULT 'Email',
+      subject    VARCHAR(255),
+      body       TEXT,
+      metadata   JSONB DEFAULT '{}',
+      logged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type       VARCHAR(50) NOT NULL,
+      title      VARCHAR(255) NOT NULL,
+      body       TEXT,
+      link       VARCHAR(500),
+      is_read    BOOLEAN NOT NULL DEFAULT FALSE,
+      metadata   JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   // Add tenant_id to all business tables
   const businessTables = [
     'leads','clients','activities','tasks','open_requests','request_replies',
