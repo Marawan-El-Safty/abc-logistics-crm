@@ -193,7 +193,7 @@ async function autoMigrate() {
       CONSTRAINT app_settings_single_row CHECK (id = 1)
     )
   `);
-  await pool.query(`INSERT INTO app_settings (id, data) VALUES (1, '{}') ON CONFLICT (id) DO NOTHING`);
+  await pool.query(`INSERT INTO app_settings (id, data) SELECT 1, '{}' WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE id = 1)`);
   // Audit log — who did what to which record
   await pool.query(`
     CREATE TABLE IF NOT EXISTS audit_log (
